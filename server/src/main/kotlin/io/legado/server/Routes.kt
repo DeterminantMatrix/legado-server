@@ -132,18 +132,25 @@ fun Route.apiRoutes(
         db: Database,
     ): LocalBookImportItem {
         return try {
-            // 只接受 TXT / EPUB。
+            // 只接受受支持格式（TXT / EPUB / MD / DOCX）。
             // 不拦的话 `LocalBookParser.parse` 会把未知格式**静默按 TXT 解析**，
             // 用户会得到一本正文是乱码的"书"且没有任何报错。
             require(LocalBookParser.isSupported(filename)) {
                 "不支持的格式（仅支持 ${LocalBookParser.SUPPORTED_FORMATS}）：$filename"
             }
-            val parsed = LocalBookParser.parse(filename, bytes)
             val bookId = UUID.randomUUID().toString().replace("-", "")
+            val parsed = LocalBookParser.parse(filename, bytes, bookId)
             val ext = if (filename.contains('.')) "." + filename.substringAfterLast('.') else ".txt"
             runCatching {
                 Files.createDirectories(booksDirectory)
                 Files.write(booksDirectory.resolve("$bookId$ext"), bytes)
+                if (parsed.mediaFiles.isNotEmpty()) {
+                    val mediaDir = booksDirectory.resolve("${bookId}_media")
+                    Files.createDirectories(mediaDir)
+                    for ((mediaName, mediaBytes) in parsed.mediaFiles) {
+                        Files.write(mediaDir.resolve(mediaName), mediaBytes)
+                    }
+                }
             }
 
             val coverKey = if (parsed.coverBytes != null && parsed.coverBytes.isNotEmpty()) {
@@ -2107,7 +2114,13 @@ fun Route.apiRoutes(
                     runCatching {
                         if (Files.exists(localBooksDirectory)) {
                             Files.list(localBooksDirectory).use { stream ->
-                                stream.filter { it.fileName.toString().startsWith(bookId) }.forEach { Files.deleteIfExists(it) }
+                                stream.filter { it.fileName.toString().startsWith(bookId) }.forEach { path ->
+                                    if (Files.isDirectory(path)) {
+                                        Files.walk(path).sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) }
+                                    } else {
+                                        Files.deleteIfExists(path)
+                                    }
+                                }
                             }
                         }
                     }
@@ -2407,8 +2420,18 @@ fun Route.apiRoutes(
                 }
                 runCatching {
                     val bytes = Files.readAllBytes(file)
-                    LocalBookParser.parse(file.fileName.toString(), bytes)
+                    LocalBookParser.parse(file.fileName.toString(), bytes, bookId)
                 }.mapCatching { parsed ->
+                    val mediaDir = localBooksDirectory.resolve("${bookId}_media")
+                    if (Files.exists(mediaDir)) {
+                        Files.walk(mediaDir).sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) }
+                    }
+                    if (parsed.mediaFiles.isNotEmpty()) {
+                        Files.createDirectories(mediaDir)
+                        for ((mediaName, mediaBytes) in parsed.mediaFiles) {
+                            Files.write(mediaDir.resolve(mediaName), mediaBytes)
+                        }
+                    }
                     database.replaceLocalBookCache(bookId, parsed)
                 }.fold(
                     onSuccess = { chapters ->
@@ -2659,6 +2682,31 @@ fun Route.apiRoutes(
             // 注：直接写头值，避免依赖 Ktor 版本里 CacheControl 的 immutable 支持差异。
             call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=31536000, immutable")
             call.respond(LocalFileContent(file.toFile(), type))
+        }
+        get("/local-books/{bookId}/media/{fileName}") {
+            if (auth.requireSession(call) == null) return@get
+            val bookId = call.parameters["bookId"] ?: return@get call.respond(HttpStatusCode.NotFound)
+            val fileName = call.parameters["fileName"] ?: return@get call.respond(HttpStatusCode.NotFound)
+            if (!Regex("^[a-fA-F0-9]{16,64}$").matches(bookId) ||
+                fileName.contains("..") ||
+                !Regex("^[a-zA-Z0-9._-]+\\.(png|jpg|jpeg|gif|webp)$", RegexOption.IGNORE_CASE).matches(fileName)
+            ) {
+                return@get call.respond(HttpStatusCode.BadRequest, ApiError("invalid_media_path", "无效的本地书籍图片路径"))
+            }
+            val mediaDir = localBooksDirectory.resolve("${bookId}_media").normalize()
+            val targetFile = mediaDir.resolve(fileName).normalize()
+            if (!targetFile.startsWith(mediaDir) || !Files.isRegularFile(targetFile)) {
+                return@get call.respond(HttpStatusCode.NotFound)
+            }
+            val type = when (fileName.substringAfterLast('.', "").lowercase()) {
+                "png" -> ContentType.Image.PNG
+                "jpg", "jpeg" -> ContentType.Image.JPEG
+                "gif" -> ContentType.Image.GIF
+                "webp" -> ContentType("image", "webp")
+                else -> ContentType.Application.OctetStream
+            }
+            call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=86400")
+            call.respond(LocalFileContent(targetFile.toFile(), type))
         }
         get("/reading-progress") {
             if (auth.requireSession(call) == null) return@get

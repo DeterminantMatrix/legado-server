@@ -42,6 +42,7 @@ import { splitIllustrationSegments, stripIllustrations } from './inlineIllustrat
 import type { IllustrationContext } from './inlineIllustrations'
 import { IllustrationLightbox, InlineIllustration } from './ReaderIllustration'
 import { isLocalBook } from './localBook'
+import { isMarkdownBlock, MarkdownBlock } from './markdownReader'
 
 export type OpenBook = { details: BookDetails; bookUrl: string; chapters: Chapter[]; progress?: ReadingProgress; bookKind?: string }
 
@@ -1511,6 +1512,24 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
     return rawLine
   }
 
+  /**
+   * 渲染单个 Markdown 语义块（支持分页/滚动、TTS 高亮与图片放大）。
+   */
+  const renderMarkdownBlockItem = (line: string, index: number, interactive = true) => {
+    const isLineActive = interactive && ttsActive && activeParagraphIndex === index
+    return (
+      <MarkdownBlock
+        key={index}
+        block={line}
+        paragraphIndex={interactive ? index : undefined}
+        isActive={isLineActive}
+        onClick={interactive ? () => { if (ttsActive) handleParagraphClick(index) } : undefined}
+        highlightText={isLineActive && currentChunk ? currentChunk.text : undefined}
+        onOpenImage={(src, alt) => setIllustrationLightbox({ src, alt })}
+      />
+    )
+  }
+
   const showBoundaryNotice = useCallback((msg: string) => {
     setBoundaryMessage(msg)
     if (boundaryTimerRef.current !== null) window.clearTimeout(boundaryTimerRef.current)
@@ -2817,14 +2836,18 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
                   {loading && <ReaderContentSkeleton />}
                   {message && <p className="reader-error">{message}</p>}
                   {paragraphs.map((line, index) => (
-                    <p
-                      key={index}
-                      data-paragraph-index={index}
-                      className={`reader-paragraph ${ttsActive && activeParagraphIndex === index ? 'tts-active-paragraph' : ''}`}
-                      onClick={() => { if (ttsActive) handleParagraphClick(index) }}
-                    >
-                      {renderParagraphLine(line, chapter?.url ?? '', chapterIndex, index)}
-                    </p>
+                    isMarkdownBlock(line)
+                      ? renderMarkdownBlockItem(line, index, true)
+                      : (
+                        <p
+                          key={index}
+                          data-paragraph-index={index}
+                          className={`reader-paragraph ${ttsActive && activeParagraphIndex === index ? 'tts-active-paragraph' : ''}`}
+                          onClick={() => { if (ttsActive) handleParagraphClick(index) }}
+                        >
+                          {renderParagraphLine(line, chapter?.url ?? '', chapterIndex, index)}
+                        </p>
+                      )
                   ))}
                 </article>
               </div>
@@ -2917,26 +2940,34 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
                 {entry.isCurrent && message && <p className="reader-error">{message}</p>}
                 {entry.isCurrent
                   ? liveScrollParagraphs.map((line, index) => (
-                    <p
-                      key={index}
-                      data-paragraph-index={index}
-                      className={`reader-paragraph ${ttsActive && activeParagraphIndex === index ? 'tts-active-paragraph' : ''}`}
-                      onClick={() => { if (ttsActive) handleParagraphClick(index) }}
-                    >
-                      {renderParagraphLine(line, chapter?.url ?? '', chapterIndex, index)}
-                    </p>
+                    isMarkdownBlock(line)
+                      ? renderMarkdownBlockItem(line, index, true)
+                      : (
+                        <p
+                          key={index}
+                          data-paragraph-index={index}
+                          className={`reader-paragraph ${ttsActive && activeParagraphIndex === index ? 'tts-active-paragraph' : ''}`}
+                          onClick={() => { if (ttsActive) handleParagraphClick(index) }}
+                        >
+                          {renderParagraphLine(line, chapter?.url ?? '', chapterIndex, index)}
+                        </p>
+                      )
                   ))
                   : entry.paragraphs.map((line, index) => (
-                    <p key={index} className="reader-paragraph">
-                      {/* 相邻章：用**它自己的**章节地址拼代理（否则图会被挂到当前章上）+ 不做朗读高亮 */}
-                      {renderParagraphLine(
-                        line,
-                        currentBook.chapters[entry.index]?.url ?? '',
-                        entry.index,
-                        index,
-                        false,
-                      )}
-                    </p>
+                    isMarkdownBlock(line)
+                      ? renderMarkdownBlockItem(line, index, false)
+                      : (
+                        <p key={index} className="reader-paragraph">
+                          {/* 相邻章：用**它自己的**章节地址拼代理（否则图会被挂到当前章上）+ 不做朗读高亮 */}
+                          {renderParagraphLine(
+                            line,
+                            currentBook.chapters[entry.index]?.url ?? '',
+                            entry.index,
+                            index,
+                            false,
+                          )}
+                        </p>
+                      )
                   ))}
               </article>
             )

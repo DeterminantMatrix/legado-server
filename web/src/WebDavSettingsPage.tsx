@@ -7,20 +7,20 @@ import { backupImportNotes } from './backupImportNotes'
 import { Icon } from './icons'
 
 /**
- * 本地书籍支持的扩展名（**产品约束：只有 TXT 与 EPUB**）。
+ * 本地书籍支持的扩展名（TXT / EPUB / MD / DOCX）。
  *
  * 前端用它做两件事：① `<input accept>` 让文件选择器默认只列这些；
  * ② 提交前再过滤一次 —— 用户可以手动切到「所有文件」，光靠 accept 拦不住。
  *
  * 服务端 `LocalBookParser.isSupported` 有**同一份规则**，两层都要有：
  * 前端拦是为了即时反馈，服务端拦才是真正的防线。
- * `.text` 是 `.txt` 的历史命名习惯，一并放行。
+ * `.text` 与 `.txt`、`.markdown` 与 `.md` 等价，一并放行。
  */
-export const LOCAL_BOOK_ACCEPT_ATTR = '.txt,.text,.epub'
+export const LOCAL_BOOK_ACCEPT_ATTR = '.txt,.text,.epub,.md,.markdown,.docx'
 
 /** 是否为受支持的本地书格式（大小写不敏感）。 */
 export function isSupportedLocalBook(filename: string): boolean {
-  return /\.(txt|text|epub)$/i.test(filename)
+  return /\.(txt|text|epub|md|markdown|docx)$/i.test(filename)
 }
 
 /** 字节数易读化（服务端返回的是精确字节）。 */
@@ -157,11 +157,11 @@ export function WebDavSettingsPage() {
   /** 勾选类开关的忙碌标记：不改任何按钮文案，因此不会有宽度变化引起的重排 */
   const [autoCacheBusy, setAutoCacheBusy] = useState(false)
 
-  // 本地书籍导入（仅 TXT / EPUB）
+  // 本地书籍导入（TXT / EPUB / MD / DOCX）
   const localBookInputRef = useRef<HTMLInputElement>(null)
   const [localBookBusy, setLocalBookBusy] = useState(false)
 
-  /** 产品约束：本地书籍只支持 TXT 与 EPUB，前端先过滤一次，避免上传后才发现不支持。 */
+  /** 本地书籍支持 TXT / EPUB / MD / DOCX，前端先过滤一次，避免上传后才发现不支持。 */
   const LOCAL_BOOK_ACCEPT = LOCAL_BOOK_ACCEPT_ATTR
 
   const handleImportLocalBooks = async (files: FileList | null) => {
@@ -170,7 +170,7 @@ export function WebDavSettingsPage() {
     const supported = all.filter(file => isSupportedLocalBook(file.name))
     const rejected = all.filter(file => !isSupportedLocalBook(file.name))
     if (supported.length === 0) {
-      toast.warning(t('webdav.onlyTxtEpub', { count: rejected.length, defaultValue: `仅支持 TXT / EPUB 格式，已忽略 ${rejected.length} 个文件` }))
+      toast.warning(t('webdav.onlyTxtEpub', { count: rejected.length, defaultValue: `仅支持 TXT / EPUB / MD / DOCX 格式，已忽略 ${rejected.length} 个文件` }))
       return
     }
     setLocalBookBusy(true)
@@ -185,7 +185,7 @@ export function WebDavSettingsPage() {
         const failedNames = result.results.filter(item => !item.success).map(item => `${item.filename}（${item.error ?? t('common.failed', { defaultValue: '解析失败' })}）`)
         const parts = [t('webdav.importSuccessPart', { count: result.imported, defaultValue: `成功 ${result.imported} 本` })]
         if (result.failed > 0) parts.push(t('webdav.importFailedPart', { count: result.failed, names: failedNames.slice(0, 3).join('；'), defaultValue: `失败 ${result.failed} 本：${failedNames.slice(0, 3).join('；')}` }))
-        if (rejected.length > 0) parts.push(t('webdav.importIgnoredPart', { count: rejected.length, defaultValue: `忽略 ${rejected.length} 个非 TXT/EPUB 文件` }))
+        if (rejected.length > 0) parts.push(t('webdav.importIgnoredPart', { count: rejected.length, defaultValue: `忽略 ${rejected.length} 个非支持格式文件` }))
         toast.warning(parts.join('；'))
       }
     } catch (error) {
@@ -943,7 +943,7 @@ export function WebDavSettingsPage() {
           </div>
         </div>
         <p className="webdav-section-desc">
-          {t('webdav.localBooksHint', { defaultValue: '支持 TXT 与 EPUB 两种格式，可一次选择多本。TXT 会自动探测编码（UTF-8 / GB18030）并按章节标题智能分章；EPUB 会读取其自带目录与封面。导入后书籍进入书架，可直接在线阅读。' })}
+          {t('webdav.localBooksHint', { defaultValue: '支持 TXT、EPUB、Markdown (.md) 与 Word (.docx) 四种格式，可一次选择多本。TXT 自动探测编码并智能分章；EPUB 读取内置目录与封面；Markdown 与 Word 支持按标题分章及富文本排版。' })}
         </p>
       </section>
 
@@ -1036,7 +1036,7 @@ export function WebDavSettingsPage() {
                       className="subtle-button"
                       onClick={() => void handleImportWebDavBook(entry)}
                       disabled={busy}
-                      title={t('webdav.importBookToShelfTitle', { defaultValue: '把这本书导入书架（仅 TXT / EPUB），导入后可直接阅读' })}
+                      title={t('webdav.importBookToShelfTitle', { defaultValue: '把这本书导入书架（支持 TXT / EPUB / MD / DOCX），导入后可直接阅读' })}
                     >
                       <Icon name="book" />
                       <span>{t('webdav.importBookToShelf', { defaultValue: '导入书籍' })}</span>

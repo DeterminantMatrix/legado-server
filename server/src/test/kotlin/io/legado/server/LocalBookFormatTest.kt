@@ -21,13 +21,13 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 /**
- * 回归测试：**本地书籍导入只接受 TXT / EPUB**。
+ * 回归测试：**本地书籍导入只接受 TXT / EPUB / MD / DOCX**。
  *
  * ## 为什么需要这条约束
  *
  * `LocalBookParser.parse` 对未知扩展名会**静默回退成按 TXT 解析**
  * （内容探测兜底）。这对手工挑选文件的场景是方便的，
- * 但在"导入本地书籍"入口会把 `.pdf`/`.mobi`/`.docx` 当成 TXT 硬解析 ——
+ * 但在"导入本地书籍"入口会把 `.pdf`/`.mobi`/`.doc` 当成 TXT 硬解析 ——
  * 用户会得到一本**目录错乱、正文是二进制乱码的"书"，且没有任何报错**。
  *
  * 因此在导入入口先按扩展名拦截。
@@ -38,13 +38,15 @@ class LocalBookFormatTest {
     // 格式判定
     // ------------------------------------------------------------------
 
-    /** TXT / EPUB（含 `.text` 历史命名）必须放行。 */
+    /** TXT / EPUB / MD / DOCX（含 `.text` 与 `.markdown`）必须放行。 */
     @Test
-    fun `accepts txt and epub`() {
+    fun `accepts txt epub md and docx`() {
         for (name in listOf(
             "book.txt", "book.TXT", "BOOK.Txt",
             "book.epub", "book.EPUB",
             "book.text",
+            "notes.md", "notes.MD", "notes.markdown", "Notes.Markdown",
+            "report.docx", "report.DOCX", "Report.DoCx",
             "带 空格 的中文书名.txt",
             "无扩展名也会被拒吗.txt",
             "a.b.c.txt",   // 多点文件名，取最后一段
@@ -62,11 +64,11 @@ class LocalBookFormatTest {
     fun `rejects every other format`() {
         for (name in listOf(
             "book.pdf", "book.mobi", "book.azw3", "book.azw", "book.fb2", "book.umd",
-            "book.cbz", "book.cbr", "book.docx", "book.doc", "book.html", "book.htm",
-            "book.zip", "book.rar", "book.md", "book.json", "book.xml",
+            "book.cbz", "book.cbr", "book.doc", "book.html", "book.htm",
+            "book.zip", "book.rar", "book.json", "book.xml",
             "无扩展名", "book.", "book.txt.exe",
         )) {
-            assertFalse("$name 应被拒绝（仅支持 TXT/EPUB）", LocalBookParser.isSupported(name))
+            assertFalse("$name 应被拒绝（仅支持 TXT/EPUB/MD/DOCX）", LocalBookParser.isSupported(name))
         }
     }
 
@@ -75,15 +77,19 @@ class LocalBookFormatTest {
     fun `format detection is case insensitive`() {
         assertTrue(LocalBookParser.isSupported("A.EpUb"))
         assertTrue(LocalBookParser.isSupported("A.TxT"))
+        assertTrue(LocalBookParser.isSupported("A.Md"))
+        assertTrue(LocalBookParser.isSupported("A.DoCx"))
         assertFalse(LocalBookParser.isSupported("A.PdF"))
     }
 
     /** 提示文案必须与实际支持的格式一致（前端也展示它）。 */
     @Test
     fun `supported formats label matches the rule`() {
-        assertEquals("TXT / EPUB", LocalBookParser.SUPPORTED_FORMATS)
+        assertEquals("TXT / EPUB / MD / DOCX", LocalBookParser.SUPPORTED_FORMATS)
         assertTrue(LocalBookParser.isSupported("x.txt"))
         assertTrue(LocalBookParser.isSupported("x.epub"))
+        assertTrue(LocalBookParser.isSupported("x.md"))
+        assertTrue(LocalBookParser.isSupported("x.docx"))
     }
 
     // ------------------------------------------------------------------
@@ -213,8 +219,8 @@ class LocalBookFormatTest {
             assertEquals("PDF 应被计为失败", 1, bad.failed)
             val message = bad.results.first().error.orEmpty()
             assertTrue(
-                "错误提示应说明仅支持 TXT/EPUB，实际：$message",
-                message.contains("TXT") && message.contains("EPUB"),
+                "错误提示应说明仅支持 TXT / EPUB / MD / DOCX，实际：$message",
+                message.contains("TXT") && message.contains("EPUB") && message.contains("MD") && message.contains("DOCX"),
             )
         } finally {
             runCatching {

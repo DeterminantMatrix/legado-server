@@ -24,7 +24,7 @@ import { ReplaceRulesModal } from './ReplaceRulesModal'
 import { ReplaceRulesPage } from './ReplaceRulesPage'
 import { BookmarksPage } from './BookmarksPage'
 import { escapeHijackedSimpleEntry } from './simpleEntry'
-import { WebDavSettingsPage } from './WebDavSettingsPage'
+import { WebDavSettingsPage, LOCAL_BOOK_ACCEPT_ATTR, isSupportedLocalBook } from './WebDavSettingsPage'
 import { ExplorePage } from './ExplorePage'
 import { OfflineCacheModal } from './OfflineCacheModal'
 import { SourceHealthModal } from './SourceHealthModal'
@@ -2046,7 +2046,7 @@ function BookManageModal({
               <div className="action-icon"><Icon name="refresh" /></div>
               <div className="action-text">
                 <strong>{reparsing ? t('shelf.reparsingDesc', '正在重新解析本地文件...') : t('shelf.reparseLocalRules', '重新解析本地文件')}</strong>
-                <small>{t('shelf.reparseLocalRulesDesc', '按留存的 TXT / EPUB 原文件重建目录与正文，阅读进度保留')}</small>
+                <small>{t('shelf.reparseLocalRulesDesc', '按留存的 TXT / EPUB / MD / DOCX 原文件重建目录与正文，阅读进度保留')}</small>
               </div>
               {reparsing ? <ButtonSpinner size={14} /> : <Icon name="arrowRight" />}
             </button>
@@ -2560,12 +2560,9 @@ function ShelfPage({ onOpen, theme }: { onOpen: (item: BookshelfItem, jump?: Boo
   }, [load])
 
   const handleImportFiles = async (files: FileList | File[]) => {
-    const list = Array.from(files).filter(f => {
-      const n = f.name.toLowerCase()
-      return n.endsWith('.txt') || n.endsWith('.epub') || n.endsWith('.text')
-    })
+    const list = Array.from(files).filter(f => isSupportedLocalBook(f.name))
     if (list.length === 0) {
-      toast.warning(t('shelf.pleaseSelectEbook', '请选择 .txt 或 .epub 格式的电子书文件'))
+      toast.warning(t('shelf.pleaseSelectEbook', '请选择 .txt、.epub、.md 或 .docx 格式的文件'))
       return
     }
     setUploading(true)
@@ -2951,7 +2948,7 @@ function ShelfPage({ onOpen, theme }: { onOpen: (item: BookshelfItem, jump?: Boo
         <div>
           <span className="section-kicker">{t('shelf.headerTitle', '我的书架')}</span>
           <h1>{t('header.shelf', '书架')}</h1>
-          <p>{t('shelf.emptyDesc', '继续上次未读完的故事，或导入本地 TXT / EPUB 电子书。')}</p>
+          <p>{t('shelf.emptyDesc', '继续上次未读完的故事，或导入本地 TXT / EPUB / MD / DOCX 书籍文档。')}</p>
         </div>
         <div className="shelf-header-actions">
           {/* 书架搜索入口：弹窗里三件事（书架 / 目录 / 正文），都是查本地库 */}
@@ -2968,7 +2965,7 @@ function ShelfPage({ onOpen, theme }: { onOpen: (item: BookshelfItem, jump?: Boo
             ref={fileInputRef}
             type="file"
             multiple
-            accept=".txt,.epub,.text,application/epub+zip,text/plain"
+            accept={`${LOCAL_BOOK_ACCEPT_ATTR},application/epub+zip,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document`}
             style={{ display: 'none' }}
             onChange={e => {
               if (e.target.files && e.target.files.length > 0) {
@@ -3065,7 +3062,7 @@ function ShelfPage({ onOpen, theme }: { onOpen: (item: BookshelfItem, jump?: Boo
         <section className="shelf-empty">
           <Icon name="book" />
           <h2>{t('shelf.emptyTitle', '书架还是空的')}</h2>
-          <p>{t('shelf.emptyDesc', '在书库检索添加在线小说，或直接导入本地 TXT / EPUB 文件。')}</p>
+          <p>{t('shelf.emptyDesc', '在书库检索添加在线小说，或直接导入本地 TXT / EPUB / MD / DOCX 文件。')}</p>
           <button
             type="button"
             className="shelf-import-btn"
@@ -3074,7 +3071,7 @@ function ShelfPage({ onOpen, theme }: { onOpen: (item: BookshelfItem, jump?: Boo
             onClick={() => fileInputRef.current?.click()}
           >
             <Icon name="upload" />
-            <span>{uploading ? t('common.loading', '正在解析导入...') : t('shelf.importBook', '导入本地 TXT / EPUB')}</span>
+            <span>{uploading ? t('common.loading', '正在解析导入...') : t('shelf.importBook', '导入本地文档')}</span>
           </button>
         </section>
       ) : visibleItems.length === 0 ? (

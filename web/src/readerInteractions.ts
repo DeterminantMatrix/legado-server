@@ -1,3 +1,5 @@
+import { isMarkdownContent, splitMarkdownBlocks } from './markdownReader'
+
 export type ReaderTapZone = 'previous' | 'toggle' | 'next'
 
 export function scrollTapZone(clientY: number, viewportHeight: number): ReaderTapZone {
@@ -171,6 +173,9 @@ export function findFirstFullyVisibleParagraphIndex(
  */
 export function splitParagraphs(raw: string): string[] {
   if (!raw) return []
+  if (isMarkdownContent(raw)) {
+    return splitMarkdownBlocks(raw)
+  }
   const result: string[] = []
   for (const line of raw.split('\n')) {
     const trimmed = line.trim()

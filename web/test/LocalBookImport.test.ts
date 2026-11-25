@@ -52,11 +52,13 @@ test('LocalBookImport - api types and local book shelf item identification', () 
   assert.equal(importResponse.results[1].author, '刘慈欣')
 })
 
-test('LocalBookImport - only TXT and EPUB are accepted', () => {
-  // 支持：TXT / EPUB（含 .text 历史命名、大小写随意）
+test('LocalBookImport - TXT, EPUB, MD and DOCX are accepted', () => {
+  // 支持：TXT / EPUB / MD / DOCX（含 .text / .markdown 命名、大小写随意）
   for (const name of [
     'book.txt', 'book.TXT', 'BOOK.Txt', 'book.text',
     'book.epub', 'book.EPUB', 'A.EpUb',
+    'notes.md', 'notes.MD', 'notes.markdown', 'Notes.Markdown',
+    'report.docx', 'report.DOCX', 'Report.DoCx',
     '带 空格 的中文书名.txt',
     'a.b.c.txt',            // 多点文件名取最后一段
   ]) {
@@ -66,8 +68,8 @@ test('LocalBookImport - only TXT and EPUB are accepted', () => {
   // 拒绝：其它一切格式（尤其 .pdf/.mobi 这些会被后端当成 TXT 硬解析出乱码的）
   for (const name of [
     'book.pdf', 'book.mobi', 'book.azw3', 'book.azw', 'book.fb2', 'book.umd',
-    'book.cbz', 'book.cbr', 'book.docx', 'book.doc', 'book.html', 'book.htm',
-    'book.zip', 'book.rar', 'book.md', 'book.json', 'book.xml',
+    'book.cbz', 'book.cbr', 'book.doc', 'book.html', 'book.htm',
+    'book.zip', 'book.rar', 'book.json', 'book.xml',
     '无扩展名', 'book.', 'book.txt.exe',
   ]) {
     assert.equal(isSupportedLocalBook(name), false, `${name} 应被拒绝`)
@@ -77,7 +79,7 @@ test('LocalBookImport - only TXT and EPUB are accepted', () => {
 test('LocalBookImport - accept attribute matches the supported set', () => {
   // `accept` 必须与判定规则一致，否则文件选择器会给出误导性的可选项
   const accepted = LOCAL_BOOK_ACCEPT_ATTR.split(',')
-  assert.deepEqual(accepted, ['.txt', '.text', '.epub'])
+  assert.deepEqual(accepted, ['.txt', '.text', '.epub', '.md', '.markdown', '.docx'])
   for (const ext of accepted) {
     assert.equal(isSupportedLocalBook(`x${ext}`), true, `accept 里的 ${ext} 必须真的被支持`)
   }
@@ -85,25 +87,25 @@ test('LocalBookImport - accept attribute matches the supported set', () => {
 
 test('LocalBookImport - batch split keeps valid files and reports the rest', () => {
   // 复刻页面里的分流逻辑：合法项提交、非法项本地拦截并计数
-  const all = ['甲.txt', '乙.epub', '丙.pdf', '丁.mobi', '戊.TXT']
+  const all = ['甲.txt', '乙.epub', '丙.pdf', '丁.mobi', '戊.TXT', '己.md', '庚.docx']
   const supported = all.filter(isSupportedLocalBook)
   const rejected = all.filter(name => !isSupportedLocalBook(name))
 
-  assert.deepEqual(supported, ['甲.txt', '乙.epub', '戊.TXT'])
+  assert.deepEqual(supported, ['甲.txt', '乙.epub', '戊.TXT', '己.md', '庚.docx'])
   assert.deepEqual(rejected, ['丙.pdf', '丁.mobi'])
   // 全部非法时必须直接提示、不发请求（避免无意义的往返）
   assert.equal(['a.pdf', 'b.mobi'].filter(isSupportedLocalBook).length, 0)
 })
 
 test('LocalBookImport - file manager offers two independent import entries', () => {
-  // 文件管理里两种入口靠后缀区分：`.zip` → 备份导入；`.txt/.epub` → 导入书籍
-  const files = ['legado-backup.zip', '凡人修仙传.txt', '三体.epub', '说明.pdf', '数据.json']
+  // 文件管理里两种入口靠后缀区分：`.zip` → 备份导入；支持格式 → 导入书籍
+  const files = ['legado-backup.zip', '凡人修仙传.txt', '三体.epub', '笔记.md', '手册.docx', '说明.pdf', '数据.json']
 
   const backupEntries = files.filter(isBackupArchive)
   const bookEntries = files.filter(isLocalBookFile)
 
   assert.deepEqual(backupEntries, ['legado-backup.zip'], '只有 .zip 给「导入」按钮')
-  assert.deepEqual(bookEntries, ['凡人修仙传.txt', '三体.epub'], '只有 TXT/EPUB 给「导入书籍」按钮')
+  assert.deepEqual(bookEntries, ['凡人修仙传.txt', '三体.epub', '笔记.md', '手册.docx'], '只有受支持格式给「导入书籍」按钮')
 
   // 两条入口**互斥**：一个文件不该同时出现两个导入按钮
   for (const name of files) {
@@ -120,7 +122,8 @@ test('LocalBookImport - isLocalBookFile stays in sync with the supported set', (
   // 否则会出现「按钮显示了但导入报不支持」的矛盾（或反过来有文件却没有入口）。
   const samples = [
     'a.txt', 'a.TXT', 'a.text', 'a.epub', 'a.EPUB',
-    'a.pdf', 'a.mobi', 'a.docx', 'a.zip', '无扩展名',
+    'a.md', 'a.markdown', 'a.docx', 'a.DOCX',
+    'a.pdf', 'a.mobi', 'a.doc', 'a.zip', '无扩展名',
   ]
   for (const name of samples) {
     assert.equal(

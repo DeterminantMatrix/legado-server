@@ -1,3 +1,5 @@
+import { isMarkdownBlock, isMarkdownContent, stripMarkdownForTts } from './markdownReader'
+
 export type TtsSentence = {
   sentenceIndex: number
   text: string
@@ -31,7 +33,12 @@ const REPETITIVE_SYMBOLS = /[=\-_*~#·]{2,}/g
 
 export function cleanTextForSpeech(text: string, filterSymbols = true): string {
   if (!text) return ''
-  let cleaned = text.trim()
+  let source = text
+  if (isMarkdownBlock(source) || isMarkdownContent(source)) {
+    source = stripMarkdownForTts(source)
+    if (!source) return ''
+  }
+  let cleaned = source.trim()
   if (DECORATION_PATTERN.test(cleaned)) return ''
 
   if (filterSymbols) {

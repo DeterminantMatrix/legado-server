@@ -74,15 +74,17 @@ test('WebDavSettingsPage - automatic export is a flush-left master switch plus t
   assert.ok(saveButtons >= 3, `expected at least 3 save buttons, got ${saveButtons}`)
 })
 
-test('WebDavSettingsPage - exposes a local book import entry limited to TXT and EPUB', () => {
+test('WebDavSettingsPage - exposes a local book import entry limited to supported formats', () => {
   const html = renderToStaticMarkup(React.createElement(WebDavSettingsPage))
 
   assert.ok(html.includes('本地书籍'), 'page should contain the local book section')
   assert.ok(html.includes('导入本地书籍'), 'page should offer importing local books')
   assert.ok(html.includes('TXT'), 'page should name the TXT format')
   assert.ok(html.includes('EPUB'), 'page should name the EPUB format')
+  assert.ok(html.includes('Markdown') || html.includes('MD'), 'page should name Markdown')
+  assert.ok(html.includes('Word') || html.includes('DOCX'), 'page should name Word/DOCX')
   // 文件选择器必须限定格式；用户可以手动切到「所有文件」，所以真正的防线在提交前过滤
-  assert.ok(html.includes('accept=".txt,.text,.epub"'), 'the file picker should restrict the extensions')
+  assert.ok(html.includes('accept=".txt,.text,.epub,.md,.markdown,.docx"'), 'the file picker should restrict the extensions')
 })
 
 test('WebDavSettingsPage - header exposes a WebDAV navigation entry', () => {
