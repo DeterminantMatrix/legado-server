@@ -55,6 +55,7 @@ class LocalBookMarkdownDocxTest {
         """.trimIndent()
 
         val parsed = LocalBookParser.parseMarkdown("原始文件名.md", md.toByteArray(Charsets.UTF_8))
+        assertEquals("md", parsed.localFormat)
         assertEquals("技术笔记指南", parsed.title)
         assertEquals("张三", parsed.author)
         assertEquals("用于验证 Markdown 解析的说明。", parsed.intro)
@@ -99,6 +100,7 @@ class LocalBookMarkdownDocxTest {
         val docxBytes = buildTestDocx(pngBytes)
         val parsed = LocalBookParser.parseDocx("测试文档.docx", docxBytes, bookId = "0123456789abcdef0123456789abcdef")
 
+        assertEquals("docx", parsed.localFormat)
         assertEquals("Word 规范文档", parsed.title)
         assertEquals("李四", parsed.author)
         assertEquals("DOCX 核心摘要", parsed.intro)
@@ -185,6 +187,15 @@ class LocalBookMarkdownDocxTest {
             val mdItem = imported.results.first { it.filename == "笔记.md" }
             val docxItem = imported.results.first { it.filename == "报告.docx" }
             val docxBookId = docxItem.bookUrl!!.removePrefix("local://")
+
+            // 验证 GET /api/bookshelf 已在 variable 中落库 localFormat 分类标记
+            val shelfResp = client.get("/api/bookshelf")
+            assertEquals(HttpStatusCode.OK, shelfResp.status)
+            val shelfItems = shelfResp.body<List<BookshelfItem>>()
+            val mdShelf = shelfItems.first { it.bookUrl == mdItem.bookUrl }
+            val docxShelf = shelfItems.first { it.bookUrl == docxItem.bookUrl }
+            assertTrue("MD 文档应在 variable 记录 localFormat=md，实际：${mdShelf.variable}", mdShelf.variable?.contains("\"localFormat\":\"md\"") == true)
+            assertTrue("DOCX 文档应在 variable 记录 localFormat=docx，实际：${docxShelf.variable}", docxShelf.variable?.contains("\"localFormat\":\"docx\"") == true)
 
             // 拉取 DOCX 第一章正文并校验图片路径可鉴权读取
             val contentResp = client.post("/api/books/content") {

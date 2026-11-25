@@ -2674,18 +2674,26 @@ class Database internal constructor(private val spec: DatabaseSpec) : Closeable,
             val tocUrl = "local://$bookId/toc"
             val now = System.currentTimeMillis()
 
+            val existingVar = db.prepareStatement("select variable from book_shelf where source_id=? and book_url=?").use { stmt ->
+                stmt.setString(1, sourceId)
+                stmt.setString(2, bookUrl)
+                stmt.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+            }
+            val mergedVar = mergeLocalFormatVariable(existingVar, parsed.localFormat)
+
             // 1. Insert/update book_shelf
             // `book_kind` 显式写 `local`（issue #66）：本地书自成一类，四类角标（本地/漫画/听书/小说）互斥。
             // 本地书**定义上**就是 local，因此 on conflict 直接覆盖（不像在线书那样 coalesce 保留旧值），
             // 这样历史被误写成 `novel` 的本地书在重新导入时也会被纠正。
             db.prepareStatement("""
-                insert into book_shelf(source_id, book_url, name, author, toc_url, cover_url, cover_key, last_read_at, completed, alternate_sources, book_kind)
-                values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                insert into book_shelf(source_id, book_url, name, author, toc_url, cover_url, cover_key, last_read_at, completed, alternate_sources, book_kind, variable)
+                values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(source_id, book_url) do update set
                     name = excluded.name, author = excluded.author, toc_url = excluded.toc_url,
                     cover_key = coalesce(excluded.cover_key, book_shelf.cover_key),
                     last_read_at = excluded.last_read_at,
-                    book_kind = excluded.book_kind
+                    book_kind = excluded.book_kind,
+                    variable = coalesce(excluded.variable, book_shelf.variable)
             """.trimIndent()).use { stmt ->
                 stmt.setString(1, sourceId)
                 stmt.setString(2, bookUrl)
@@ -2698,6 +2706,7 @@ class Database internal constructor(private val spec: DatabaseSpec) : Closeable,
                 stmt.setInt(9, 0)
                 stmt.setString(10, "[]")
                 stmt.setString(11, BookKind.LOCAL.wire)
+                stmt.setString(12, mergedVar)
                 stmt.executeUpdate()
             }
 
@@ -2838,10 +2847,20 @@ class Database internal constructor(private val spec: DatabaseSpec) : Closeable,
         val bookUrl = "local://$bookId"
         db.autoCommit = false
         try {
-            if (getBookshelf(db, sourceId, bookUrl) == null) {
+            val existing = getBookshelf(db, sourceId, bookUrl)
+            if (existing == null) {
                 db.rollback()
                 0
             } else {
+                val mergedVar = mergeLocalFormatVariable(existing.variable, parsed.localFormat)
+                if (mergedVar != existing.variable) {
+                    db.prepareStatement("update book_shelf set variable=? where source_id=? and book_url=?").use { stmt ->
+                        stmt.setString(1, mergedVar)
+                        stmt.setString(2, sourceId)
+                        stmt.setString(3, bookUrl)
+                        stmt.executeUpdate()
+                    }
+                }
                 val count = writeLocalBookCaches(db, bookId, parsed, System.currentTimeMillis())
                 db.commit()
                 count
@@ -4415,6 +4434,14 @@ class Database internal constructor(private val spec: DatabaseSpec) : Closeable,
         val merged = parseBookVariables(getBookVariable(sourceId, bookUrl)).toMutableMap()
         merged[CUSTOM_VARIABLE_KEY] = value
         return saveBookVariables(sourceId, bookUrl, merged)
+    }
+
+    /** 合并写入本地格式标记到 `book_shelf.variable`（保留其它已有键，不破坏 custom 等变量）。 */
+    private fun mergeLocalFormatVariable(existing: String?, localFormat: String?): String? {
+        val fmt = localFormat?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return existing?.trim()?.takeIf { it.isNotEmpty() }
+        val merged = parseBookVariables(existing).toMutableMap()
+        merged["localFormat"] = fmt
+        return Json.encodeToString(merged.toMap())
     }
 
     /** 容错解析：非法 JSON / 非字符串值一律丢弃（书源写坏了不能把书架读崩）。 */

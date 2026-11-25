@@ -36,12 +36,15 @@ test('HeaderMenu - AppHeader static rendering', () => {
   assert.ok(html.includes('阅读服务器'), 'Header should contain brand title')
   assert.ok(html.includes('app-brand'), 'Header should have app-brand class')
   
-  // Verify 5 main navigation tabs
+  // Verify navigation tabs and that 文档 appears to the right of 文件
   assert.ok(html.includes('书库'), 'Header should contain 书库 tab')
   assert.ok(html.includes('书架'), 'Header should contain 书架 tab')
   assert.ok(html.includes('书源'), 'Header should contain 书源 tab')
   assert.ok(html.includes('订阅'), 'Header should contain 订阅 tab')
   assert.ok(html.includes('规则'), 'Header should contain 规则 tab')
+  assert.ok(html.includes('文件'), 'Header should contain 文件 tab')
+  assert.ok(html.includes('文档'), 'Header should contain 文档 tab')
+  assert.ok(html.indexOf('文件') < html.indexOf('文档'), '文档 tab should be placed to the right of 文件 tab')
 
   // Verify hamburger menu button
   assert.ok(html.includes('header-menu-btn'), 'Header should contain hamburger menu button')

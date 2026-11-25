@@ -25,6 +25,8 @@ import { ReplaceRulesPage } from './ReplaceRulesPage'
 import { BookmarksPage } from './BookmarksPage'
 import { escapeHijackedSimpleEntry } from './simpleEntry'
 import { WebDavSettingsPage, LOCAL_BOOK_ACCEPT_ATTR, isSupportedLocalBook } from './WebDavSettingsPage'
+import { DocumentsPage } from './DocumentsPage'
+import { isDocumentItem, isSupportedDocumentFile } from './documents'
 import { ExplorePage } from './ExplorePage'
 import { OfflineCacheModal } from './OfflineCacheModal'
 import { SourceHealthModal } from './SourceHealthModal'
@@ -69,11 +71,11 @@ function resolveShelfCover(item: { coverKey?: string; coverUrl?: string }): stri
 // 「本地导入书」的判定（`loc_book` / `local://`）统一走 `./localBook` 的 `isLocalBook`：
 // 与服务端 `BookKind.isLocalRef` 同源，角标、书籍管理弹窗、阅读器目录抽屉三处共用同一判据。
 
-type Page = 'sources' | 'subscriptions' | 'library' | 'shelf' | 'reader' | 'rules' | 'webdav' | 'explore' | 'bookmarks'
+type Page = 'sources' | 'subscriptions' | 'library' | 'shelf' | 'reader' | 'rules' | 'webdav' | 'documents' | 'explore' | 'bookmarks'
 /** 从「书签」页跳进阅读器时要落到的位置（章序号 + 章内字符偏移；章名用于换源后重新定位）。 */
 type BookmarkJumpTarget = { chapterIndex: number; chapterPos: number; chapterName?: string | null }
 const readerStorageKey = 'legado-open-book-v1'
-const pageFromHash = (): Page => location.hash === '#sources' ? 'sources' : location.hash === '#subscriptions' ? 'subscriptions' : location.hash === '#rules' ? 'rules' : location.hash === '#webdav' ? 'webdav' : location.hash === '#shelf' ? 'shelf' : location.hash === '#reader' ? 'reader' : location.hash === '#explore' ? 'explore' : location.hash === '#bookmarks' ? 'bookmarks' : 'library'
+const pageFromHash = (): Page => location.hash === '#sources' ? 'sources' : location.hash === '#subscriptions' ? 'subscriptions' : location.hash === '#rules' ? 'rules' : location.hash === '#webdav' ? 'webdav' : location.hash === '#documents' ? 'documents' : location.hash === '#shelf' ? 'shelf' : location.hash === '#reader' ? 'reader' : location.hash === '#explore' ? 'explore' : location.hash === '#bookmarks' ? 'bookmarks' : 'library'
 
 function SourceChoiceList({
   choices,
@@ -2534,10 +2536,12 @@ function ShelfPage({ onOpen, theme }: { onOpen: (item: BookshelfItem, jump?: Boo
 
   const load = useCallback(async () => {
     try {
-      const [list, groupList] = await Promise.all([
+      const [rawList, groupList] = await Promise.all([
         api.bookshelf(),
         api.bookGroups(),
       ])
+      // MD / DOCX 专属展示在顶部「文档」页，书架仅保留小说/漫画/听书与本地 TXT/EPUB
+      const list = rawList.filter(curr => !isDocumentItem(curr))
       list.forEach(curr => {
         const key = `${curr.sourceId}\u0000${curr.bookUrl}`
         const prevState = previousStateRef.current.get(key)
@@ -2571,6 +2575,9 @@ function ShelfPage({ onOpen, theme }: { onOpen: (item: BookshelfItem, jump?: Boo
       const resp = await api.importLocalBooks(list)
       if (resp.imported > 0) {
         toast.success(t('shelf.importSuccessBooks', '成功导入 {{count}} 本本地书籍！', { count: resp.imported }))
+        if (list.some(f => isSupportedDocumentFile(f.name))) {
+          toast.info(t('shelf.importedMovedToDocuments', 'MD / DOCX 文档已归入顶部「文档」页，点击即可阅读'))
+        }
       }
       if (resp.failed > 0) {
         const errorMsg = resp.results.filter(r => !r.success).map(r => `${r.filename}: ${r.error}`).join('; ')
@@ -3445,7 +3452,7 @@ function App() {
     setPage('reader')
   }
 
-  const openShelfItem = async (item: BookshelfItem, bookmark?: BookmarkJumpTarget) => {
+  const openShelfItem = async (item: BookshelfItem, bookmark?: BookmarkJumpTarget, returnPage: Page = 'shelf') => {
     // 阅读器里显示封面用的地址（不再回写书架）。三级回退：
     // 本地副本 → 兄弟书源的封面 → **本条自己的 coverUrl**。
     // 最后一级曾经漏掉：只靠外链、没有本地副本的书会传 undefined 上去，
@@ -3513,7 +3520,7 @@ function App() {
           scrollPosition: item.scrollPosition ?? 0,
           updatedAt: item.lastReadAt,
         } : undefined),
-      }, jump?.index ?? resumeIdx, 'shelf', jump?.bookmark)
+      }, jump?.index ?? resumeIdx, returnPage, jump?.bookmark)
     } catch {
       // Offline / network fallback: allow entering reader so user can read local cached chapters
       const resumeIdx = item.chapterIndex ?? 0
@@ -3533,7 +3540,7 @@ function App() {
           updatedAt: item.lastReadAt,
         },
         bookKind: item.bookKind,
-      }, resumeIdx, 'shelf')
+      }, resumeIdx, returnPage)
       // 兜底目录只有当前这一章（index = resumeIdx），书签落点无处可落 ⇒ 不传 bookmark，
       // 但必须把 resumeIdx 传回去：ReaderScreen 靠 `chapter.index === startIndex` 恢复进度，
       // 传 0 会让 resumeIdx>0 的普通开书丢掉滚动位置（审查指出的回归）。
@@ -3669,6 +3676,8 @@ function App() {
           <ReplaceRulesPage />
         ) : page === 'webdav' ? (
           <WebDavSettingsPage />
+        ) : page === 'documents' ? (
+          <DocumentsPage onOpen={item => void openShelfItem(item, undefined, 'documents')} />
         ) : page === 'explore' ? (
           <ExplorePage onOpen={(book, index) => openReader(book, index, 'explore')} />
         ) : page === 'shelf' ? (

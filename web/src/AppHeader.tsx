@@ -9,7 +9,7 @@ import type { ReaderSettings } from './readerSettings'
 import { SUPPORTED_LOCALES, type SupportedLocale, changeAppLanguage, getCurrentLocale } from './i18n'
 import { api } from './api'
 
-export type AppPage = 'sources' | 'subscriptions' | 'library' | 'shelf' | 'reader' | 'rules' | 'webdav' | 'explore' | 'bookmarks'
+export type AppPage = 'sources' | 'subscriptions' | 'library' | 'shelf' | 'reader' | 'rules' | 'webdav' | 'documents' | 'explore' | 'bookmarks'
 
 export interface AppHeaderProps {
   page: AppPage
@@ -328,6 +328,14 @@ export function AppHeader({
           onClick={() => onNavigate('webdav')}
         >
           {t('header.webdav')}
+        </button>
+        <button
+          type="button"
+          className={page === 'documents' ? 'active' : ''}
+          title={t('header.documentsTitle', 'Markdown 与 Word 文档库')}
+          onClick={() => onNavigate('documents')}
+        >
+          {t('header.documents', '文档')}
         </button>
       </nav>
 

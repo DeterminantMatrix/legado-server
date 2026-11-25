@@ -24,6 +24,8 @@ data class ParsedBook(
     val chapters: List<ParsedChapter>,
     /** 内嵌媒体资源（如 DOCX 提取的图片：规范化文件名 -> 字节）。 */
     val mediaFiles: Map<String, ByteArray> = emptyMap(),
+    /** 源文件格式标识（`"txt"` / `"epub"` / `"md"` / `"docx"`），用于前端文档库归类。 */
+    val localFormat: String? = null,
 )
 
 data class ParsedChapter(
@@ -153,6 +155,7 @@ object LocalBookParser {
             coverBytes = coverSvg.toByteArray(StandardCharsets.UTF_8),
             coverContentType = "image/svg+xml",
             chapters = finalChapters,
+            localFormat = "txt",
         )
     }
 
@@ -322,6 +325,7 @@ object LocalBookParser {
             coverBytes = coverBytes,
             coverContentType = coverContentType,
             chapters = finalChapters,
+            localFormat = "epub",
         )
     }
 
@@ -372,6 +376,7 @@ object LocalBookParser {
             coverBytes = coverSvg.toByteArray(StandardCharsets.UTF_8),
             coverContentType = "image/svg+xml",
             chapters = chapters,
+            localFormat = "md",
         )
     }
 
@@ -627,6 +632,7 @@ object LocalBookParser {
             coverContentType = coverContentType,
             chapters = chapters,
             mediaFiles = mediaFiles,
+            localFormat = "docx",
         )
     }
 
