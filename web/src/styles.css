@@ -8040,6 +8040,21 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
 .docs-context-item:hover {
   background: var(--surface-muted);
 }
+.docs-context-item:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.docs-context-item:disabled:hover {
+  background: transparent;
+}
+.docs-context-kbd {
+  margin-left: auto;
+  padding-left: 14px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.85;
+}
 .docs-context-item.danger {
   color: var(--danger);
 }
@@ -8564,6 +8579,170 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   color: var(--accent-ink);
   font-size: 12px;
   line-height: 1.5;
+}
+
+/* 文档剪贴板与剪切视觉状态 */
+.docs-clipboard-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 10px 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 12px;
+}
+.docs-clipboard-banner svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--accent);
+}
+.docs-clipboard-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.docs-clipboard-cancel {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  flex: none;
+}
+.docs-clipboard-cancel:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.docs-tree-row.is-cut,
+.docs-tree-file.is-cut,
+.doc-card.is-cut {
+  opacity: 0.52;
+  border-style: dashed;
+}
+
+/* Markdown / Word 阅读器多级大纲目录与跳转闪光 */
+.reader-outline-list {
+  contain: layout style;
+  padding: 4px 0 8px;
+}
+.reader-outline-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  padding-right: 10px;
+  border-left: 3px solid transparent;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+.reader-outline-row.depth-0 {
+  padding-left: 8px;
+  font-weight: 600;
+}
+.reader-outline-row.depth-1 {
+  padding-left: 22px;
+  font-weight: 500;
+}
+.reader-outline-row.depth-2 {
+  padding-left: 36px;
+  font-size: 12.5px;
+}
+.reader-outline-row.depth-3 {
+  padding-left: 48px;
+  font-size: 12px;
+}
+.reader-outline-row:hover {
+  background: var(--surface-muted);
+}
+.reader-outline-row.current {
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+}
+.reader-outline-row.in-current-chapter {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.reader-outline-toggle {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+.reader-outline-toggle:hover {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--ink);
+}
+.reader-outline-toggle svg {
+  width: 13px;
+  height: 13px;
+}
+.reader-outline-spacer {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.reader-outline-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--muted) 65%, transparent);
+}
+.reader-outline-row.depth-1 .reader-outline-dot {
+  width: 5px;
+  height: 5px;
+  background: color-mix(in srgb, var(--accent) 65%, transparent);
+}
+.reader-outline-item {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: inherit;
+  font-weight: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.reader-outline-row:hover .reader-outline-item,
+.reader-outline-row.in-current-chapter .reader-outline-item {
+  color: var(--ink);
+}
+.reader-outline-row.current .reader-outline-item {
+  color: var(--accent);
+}
+@keyframes md-heading-flash-bg {
+  0% {
+    background-color: color-mix(in srgb, var(--accent) 28%, transparent);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.md-block.md-heading-flash {
+  border-radius: 6px;
+  animation: md-heading-flash-bg 1.4s ease-out;
 }
 
 

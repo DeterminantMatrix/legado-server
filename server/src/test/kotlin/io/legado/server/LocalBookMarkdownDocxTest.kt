@@ -324,6 +324,56 @@ class LocalBookMarkdownDocxTest {
         return out.toByteArray()
     }
 
+    @Test
+    fun `markdown and docx extract level 2 and level 3 subheadings cleanly`() {
+        val md = """
+            # 第一章 总纲
+
+            导语内容。
+
+            ## 1.1 **背景介绍**
+
+            一段背景正文。
+
+            ```bash
+            ### 代码块中的伪标题绝对不能被提取
+            ```
+
+            ### 1.1.1 关键细节与 `内联代码`
+
+            细节说明。
+
+            #### 四级标题示例
+
+            # 第二章 执行路径
+
+            ## 2.1 [方案对比](https://example.com)
+
+            表格或列表。
+        """.trimIndent()
+
+        val parsed = LocalBookParser.parseMarkdown("outline-test.md", md.toByteArray(Charsets.UTF_8))
+        assertEquals(2, parsed.chapters.size)
+        assertEquals(1, parsed.chapters[0].level)
+        val firstHeadings = parsed.chapters[0].headings ?: emptyList()
+        assertEquals(3, firstHeadings.size)
+        assertEquals(2, firstHeadings[0].level)
+        assertEquals("1.1 背景介绍", firstHeadings[0].title)
+        assertEquals(0, firstHeadings[0].ordinal)
+        assertEquals(3, firstHeadings[1].level)
+        assertEquals("1.1.1 关键细节与 内联代码", firstHeadings[1].title)
+        assertEquals(1, firstHeadings[1].ordinal)
+        assertEquals(4, firstHeadings[2].level)
+        assertEquals("四级标题示例", firstHeadings[2].title)
+        assertEquals(2, firstHeadings[2].ordinal)
+
+        val secondHeadings = parsed.chapters[1].headings ?: emptyList()
+        assertEquals(1, secondHeadings.size)
+        assertEquals(2, secondHeadings[0].level)
+        assertEquals("2.1 方案对比", secondHeadings[0].title)
+        assertEquals(0, secondHeadings[0].ordinal)
+    }
+
     private companion object {
         const val PASSWORD = "md-docx-test-password"
     }

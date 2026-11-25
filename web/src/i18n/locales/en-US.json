@@ -633,7 +633,10 @@
     "jumpToBookmark": "Jump to bookmark",
     "editBookmark": "Edit bookmark",
     "deleteBookmarkTitle": "Delete bookmark",
-    "deleteBookmarkMessage": "Delete this bookmark?"
+    "deleteBookmarkMessage": "Delete this bookmark?",
+    "searchOutline": "Search chapters or headings",
+    "expandOutline": "Expand subheadings",
+    "collapseOutline": "Collapse subheadings"
   },
   "tts": {
     "title": "Speech Settings",
@@ -1639,6 +1642,19 @@
     "refreshExplorer": "Refresh Explorer",
     "explorerFooterHint": "Right-click items to manage · Drag edge to resize",
     "resizeSidebarAria": "Drag to resize explorer sidebar, double-click to reset",
-    "contextMenuAria": "Document explorer context menu"
+    "contextMenuAria": "Document explorer context menu",
+    "cut": "Cut",
+    "copy": "Copy",
+    "paste": "Paste",
+    "pasteNamed": "Paste \"{{name}}\"",
+    "cutToast": "Cut \"{{name}}\", right-click a target folder to paste",
+    "copyToast": "Copied \"{{name}}\", right-click a target folder to paste",
+    "copySuccess": "Copied {{count}} documents to \"{{folder}}\"",
+    "folderCopySuccess": "Copied folder \"{{name}}\" ({{folders}} folders, {{docs}} docs)",
+    "pasteSuccess": "Paste completed",
+    "cannotMoveOrCopyIntoSelf": "Cannot move or copy a folder into itself or its subfolder",
+    "clipboardBannerCut": "Move pending: {{name}}",
+    "clipboardBannerCopy": "Copied: {{name}}",
+    "cancelClipboard": "Cancel"
   }
 }

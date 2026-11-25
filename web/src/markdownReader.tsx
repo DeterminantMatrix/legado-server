@@ -1,4 +1,5 @@
 import React from 'react'
+import type { Chapter, ChapterHeading } from './api'
 
 /** 与服务端 [LocalBookParser.MARKDOWN_CONTENT_MARKER] 逐字对齐的正文协议头。 */
 export const MARKDOWN_CONTENT_MARKER = '<!--legado:md-->'
@@ -26,6 +27,145 @@ export function isMarkdownBlock(line: string): boolean {
 
 export function stripMarkdownBlockPrefix(line: string): string {
   return line.startsWith(MARKDOWN_BLOCK_PREFIX) ? line.slice(MARKDOWN_BLOCK_PREFIX.length) : line
+}
+
+export function isAtxHeadingBlock(block: string): boolean {
+  const raw = stripMarkdownBlockPrefix(block).trim()
+  if (!raw || raw.includes('\n')) return false
+  return ATX_HEADING_RE.test(raw)
+}
+
+/** 清洗 Markdown 标题行内的语法标记，保留纯粹可读文本用于目录显示。 */
+export function cleanMarkdownHeadingText(raw: string): string {
+  let s = raw.trim()
+  s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+  s = s.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+  s = s.replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1')
+  s = s.replace(/`([^`]+)`/g, '$1')
+  s = s.replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
+  s = s.replace(/\*\*([^*]+)\*\*/g, '$1')
+  s = s.replace(/__([^_]+)__/g, '$1')
+  s = s.replace(/~~([^~]+)~~/g, '$1')
+  s = s.replace(/==([^=]+)==/g, '$1')
+  s = s.replace(/(?<!\\)\*([^*]+)\*/g, '$1')
+  s = s.replace(/(?<!\\)_([^_]+)_/g, '$1')
+  s = s.replace(/\\([\\`*_{}[\]()#+\-.!])/g, '$1')
+  s = s.replace(/\s+#+\s*$/, '')
+  return s.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * 从 Markdown 正文字符串或语义块数组中提取多级 ATX 标题，
+ * 自动跳过围栏代码块，并为每个标题分配与正文渲染一致的 `ordinal`（从 0 起）。
+ */
+export function extractMarkdownHeadings(blocksOrRaw: string | string[]): ChapterHeading[] {
+  const blocks = Array.isArray(blocksOrRaw)
+    ? blocksOrRaw
+    : (isMarkdownContent(blocksOrRaw) ? splitMarkdownBlocks(blocksOrRaw) : splitMarkdownBlocks(`${MARKDOWN_CONTENT_MARKER}\n${blocksOrRaw}`))
+
+  const result: ChapterHeading[] = []
+  let ordinal = 0
+
+  for (const block of blocks) {
+    const raw = stripMarkdownBlockPrefix(block).trim()
+    if (!raw || raw.includes('\n')) continue
+    if (FENCE_START_RE.test(raw)) continue
+    const match = ATX_HEADING_RE.exec(raw)
+    if (!match) continue
+    const level = Math.min(6, Math.max(1, match[1].length))
+    const title = cleanMarkdownHeadingText(match[2])
+    if (title) {
+      result.push({ level, title, ordinal })
+    }
+    ordinal += 1
+  }
+
+  return result
+}
+
+export type DocumentOutlineItem = {
+  id: string
+  chapterIndex: number
+  chapterTitle: string
+  level: number
+  depth: number
+  title: string
+  headingOrdinal?: number
+  isChapterRoot: boolean
+  hasChildren: boolean
+}
+
+function normalizeHeadingCompare(text: string): string {
+  return cleanMarkdownHeadingText(text).toLowerCase()
+}
+
+/**
+ * 结合章节元信息与（服务端或客户端实时提取的）章节内 ATX 子标题，
+ * 构建可直接用于目录抽屉展示和搜索的多层级大纲列表。
+ */
+export function buildDocumentOutline(
+  chapters: Chapter[],
+  liveHeadingsByChapter?: Map<number, ChapterHeading[]>,
+): DocumentOutlineItem[] {
+  if (chapters.length === 0) return []
+
+  let minRootLevel = 6
+  let hasExplicitLevel = false
+  for (const ch of chapters) {
+    if (typeof ch.level === 'number' && ch.level >= 1 && ch.level <= 6) {
+      hasExplicitLevel = true
+      if (ch.level < minRootLevel) minRootLevel = ch.level
+    }
+  }
+  const baseMinLevel = hasExplicitLevel ? minRootLevel : 1
+
+  const outline: DocumentOutlineItem[] = []
+
+  for (const ch of chapters) {
+    const rootLevel = typeof ch.level === 'number' && ch.level >= 1 && ch.level <= 6 ? ch.level : 1
+    const rootDepth = Math.min(3, Math.max(0, rootLevel - baseMinLevel))
+    const live = liveHeadingsByChapter?.get(ch.index)
+    const rawSubHeadings = live && live.length > 0 ? live : (ch.headings ?? [])
+
+    const chapterCompare = normalizeHeadingCompare(ch.title)
+    const filteredSubs = rawSubHeadings.filter((h, idx) => {
+      if (!h.title.trim()) return false
+      if (idx === 0 && h.level <= rootLevel && normalizeHeadingCompare(h.title) === chapterCompare) {
+        return false
+      }
+      return true
+    })
+
+    outline.push({
+      id: `ch-${ch.index}`,
+      chapterIndex: ch.index,
+      chapterTitle: ch.title,
+      level: rootLevel,
+      depth: rootDepth,
+      title: ch.title,
+      headingOrdinal: undefined,
+      isChapterRoot: true,
+      hasChildren: filteredSubs.length > 0,
+    })
+
+    for (const sub of filteredSubs) {
+      const level = Math.min(6, Math.max(1, sub.level))
+      const depth = Math.min(3, Math.max(rootDepth + 1, level - baseMinLevel))
+      outline.push({
+        id: `ch-${ch.index}-h-${sub.ordinal}`,
+        chapterIndex: ch.index,
+        chapterTitle: ch.title,
+        level,
+        depth,
+        title: sub.title,
+        headingOrdinal: sub.ordinal,
+        isChapterRoot: false,
+        hasChildren: false,
+      })
+    }
+  }
+
+  return outline
 }
 
 export function stripMarkdownContentMarker(raw: string): string {
@@ -397,7 +537,9 @@ export function renderInlineMarkdown(
 export type MarkdownBlockProps = {
   block: string
   paragraphIndex?: number
+  headingOrdinal?: number
   isActive?: boolean
+  isFlashed?: boolean
   onClick?: () => void
   highlightText?: string
   onOpenImage?: (src: string, alt: string) => void
@@ -412,7 +554,9 @@ export type MarkdownBlockProps = {
 export function MarkdownBlock({
   block,
   paragraphIndex,
+  headingOrdinal,
   isActive = false,
+  isFlashed = false,
   onClick,
   highlightText,
   onOpenImage,
@@ -424,10 +568,11 @@ export function MarkdownBlock({
   const firstLine = lines[0]
   const inlineOpts = { highlightText, onOpenImage }
 
-  const wrap = (kind: string, children: React.ReactNode) => (
+  const wrap = (kind: string, children: React.ReactNode, headingOrd?: number) => (
     <div
       data-paragraph-index={paragraphIndex}
-      className={`reader-paragraph md-block md-block-${kind}${isActive ? ' tts-active-paragraph' : ''}`}
+      data-md-heading-ordinal={headingOrd}
+      className={`reader-paragraph md-block md-block-${kind}${isActive ? ' tts-active-paragraph' : ''}${isFlashed ? ' md-heading-flash' : ''}`}
       onClick={onClick}
     >
       {children}
@@ -469,7 +614,7 @@ export function MarkdownBlock({
     else if (level === 4) headingEl = <h4 className={cls}>{content}</h4>
     else if (level === 5) headingEl = <h5 className={cls}>{content}</h5>
     else headingEl = <h6 className={cls}>{content}</h6>
-    return wrap(`h${level}`, headingEl)
+    return wrap(`h${level}`, headingEl, headingOrdinal)
   }
 
   // 4. 独立图片块（可点击灯箱预览）

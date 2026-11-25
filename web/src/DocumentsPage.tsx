@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { api, BookshelfItem, DocFolder } from './api'
 import {
@@ -57,6 +58,15 @@ type ContextMenuState = {
   target: ContextMenuTarget
 }
 
+type ClipboardState =
+  | { mode: 'cut' | 'copy'; kind: 'docs'; items: DragDocRef[]; label: string }
+  | { mode: 'cut' | 'copy'; kind: 'folder'; folder: DocFolder }
+
+type FocusedTarget =
+  | { kind: 'folder'; folder: DocFolder }
+  | { kind: 'file'; item: BookshelfItem }
+  | null
+
 export function DocumentsPage({ onOpen, initialItems, initialFolders }: DocumentsPageProps) {
   const { t } = useTranslation()
   const [items, setItems] = useState<BookshelfItem[]>(() => (initialItems ?? []).filter(isDocumentItem))
@@ -67,6 +77,12 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(() => {
     const init = new Set<string>()
     for (const f of initialFolders ?? []) init.add(f.id)
+    const validIds = new Set((initialFolders ?? []).map(f => f.id))
+    const hasUnfiled = (initialItems ?? []).filter(isDocumentItem).some(it => {
+      const fid = getDocumentFolderId(it)
+      return !fid || !validIds.has(fid)
+    })
+    if (hasUnfiled) init.add(DOC_VIEW_UNFILED)
     return init
   })
   const [formatFilter, setFormatFilter] = useState<'all' | DocumentFormat>('all')
@@ -80,6 +96,8 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
   const [openMenuKey, setOpenMenuKey] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const [clipboard, setClipboard] = useState<ClipboardState | null>(null)
+  const [focusedTarget, setFocusedTarget] = useState<FocusedTarget>(null)
   const [mobileExplorerOpen, setMobileExplorerOpen] = useState(false)
   const [modal, setModal] = useState<FolderModalState | null>(null)
   const [modalBusy, setModalBusy] = useState(false)
@@ -95,6 +113,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
   const [resizingSidebar, setResizingSidebar] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pendingUploadFolderIdRef = useRef<string | null | undefined>(undefined)
+  const contextMenuRef = useRef<HTMLDivElement | null>(null)
   const explorerHydratedRef = useRef(false)
 
   useEffect(() => {
@@ -114,11 +133,19 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
         api.bookshelf(),
         api.docFolders().catch(() => [] as DocFolder[]),
       ])
-      setItems(shelfList.filter(isDocumentItem))
+      const docItems = shelfList.filter(isDocumentItem)
+      setItems(docItems)
       setFolders(folderList)
       if (!explorerHydratedRef.current) {
         explorerHydratedRef.current = true
-        setExpandedFolderIds(new Set(folderList.map(f => f.id)))
+        const nextExpanded = new Set(folderList.map(f => f.id))
+        const validIds = new Set(folderList.map(f => f.id))
+        const hasUnfiled = docItems.some(it => {
+          const fid = getDocumentFolderId(it)
+          return !fid || !validIds.has(fid)
+        })
+        if (hasUnfiled) nextExpanded.add(DOC_VIEW_UNFILED)
+        setExpandedFolderIds(nextExpanded)
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t('documents.loadFailed', '无法加载文档列表'))
@@ -141,22 +168,25 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
     }
   }, [folders, selectedView])
 
-  // 点击页面空白处或按下 Esc 时关闭卡片更多菜单或右键上下文菜单
+  // 使用 mousedown 监听外部点击与窗口变化，保证 Portal 右键菜单项点击稳定触发
   useEffect(() => {
     if (!openMenuKey && !contextMenu) return
-    const closeMenus = () => {
+    const closeMenus = (event?: Event) => {
+      if (event?.type === 'mousedown' && contextMenuRef.current && event.target instanceof Node) {
+        if (contextMenuRef.current.contains(event.target)) return
+      }
       setOpenMenuKey(null)
       setContextMenu(null)
     }
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') closeMenus()
     }
-    window.addEventListener('click', closeMenus)
+    window.addEventListener('mousedown', closeMenus)
     window.addEventListener('resize', closeMenus)
     window.addEventListener('scroll', closeMenus, true)
     window.addEventListener('keydown', onKeyDown)
     return () => {
-      window.removeEventListener('click', closeMenus)
+      window.removeEventListener('mousedown', closeMenus)
       window.removeEventListener('resize', closeMenus)
       window.removeEventListener('scroll', closeMenus, true)
       window.removeEventListener('keydown', onKeyDown)
@@ -233,6 +263,13 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
     return folderSelectOptions.filter(opt => !blockedIds.has(opt.id))
   }, [modal, folders, folderSelectOptions])
 
+  const cutDocKeySet = useMemo(() => {
+    if (!clipboard || clipboard.mode !== 'cut' || clipboard.kind !== 'docs') return new Set<string>()
+    return new Set(clipboard.items.map(r => `${r.sourceId}\u0000${r.bookUrl}`))
+  }, [clipboard])
+
+  const cutFolderId = clipboard?.mode === 'cut' && clipboard.kind === 'folder' ? clipboard.folder.id : null
+
   const toggleExpandFolder = (folderId: string) => {
     setExpandedFolderIds(prev => {
       const next = new Set(prev)
@@ -242,7 +279,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
     })
   }
 
-  const expandFolderChain = (folderId: string | null) => {
+  const expandFolderChain = useCallback((folderId: string | null) => {
     if (!folderId) return
     const crumb = getFolderBreadcrumb(folders, folderId)
     setExpandedFolderIds(prev => {
@@ -251,7 +288,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
       for (const f of crumb) next.add(f.id)
       return next
     })
-  }
+  }, [folders])
 
   const selectView = (view: string, keepOpenOnMobile = false) => {
     setSelectedView(view)
@@ -304,6 +341,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
         toast.warning(parts.join('；'))
       }
       if (targetFolderId) expandFolderChain(targetFolderId)
+      else setExpandedFolderIds(prev => new Set([...prev, DOC_VIEW_UNFILED]))
       await load()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('documents.importFailed', '导入文档失败'))
@@ -329,7 +367,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
     }))
   }
 
-  const handleMoveDocuments = async (refs: DragDocRef[], folderId: string | null) => {
+  const handleMoveDocuments = useCallback(async (refs: DragDocRef[], folderId: string | null) => {
     if (refs.length === 0) return
     try {
       await api.assignDocumentsFolder(refs, folderId)
@@ -339,10 +377,95 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
         : t('documents.unfiledDocs', '未归类')
       toast.success(t('documents.moveSuccess', { folder: folderName, defaultValue: `已将文档移入「${folderName}」` }))
       if (folderId) expandFolderChain(folderId)
+      else setExpandedFolderIds(prev => new Set([...prev, DOC_VIEW_UNFILED]))
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('documents.actionFailed', '操作失败'))
     }
-  }
+  }, [expandFolderChain, folders, t])
+
+  // Windows 资源管理器剪贴板操作（剪切 / 复制 / 粘贴）
+  const setDocsClipboard = useCallback((mode: 'cut' | 'copy', refs: DragDocRef[], label: string) => {
+    if (refs.length === 0) return
+    setClipboard({ mode, kind: 'docs', items: refs, label })
+    toast.info(
+      mode === 'cut'
+        ? t('documents.cutToast', { name: label, defaultValue: `已剪切「${label}」，右键目标文件夹可粘贴` })
+        : t('documents.copyToast', { name: label, defaultValue: `已复制「${label}」，右键目标文件夹可粘贴` }),
+    )
+  }, [t])
+
+  const setFolderClipboard = useCallback((mode: 'cut' | 'copy', folder: DocFolder) => {
+    setClipboard({ mode, kind: 'folder', folder })
+    toast.info(
+      mode === 'cut'
+        ? t('documents.cutToast', { name: folder.name, defaultValue: `已剪切「${folder.name}」，右键目标文件夹可粘贴` })
+        : t('documents.copyToast', { name: folder.name, defaultValue: `已复制「${folder.name}」，右键目标文件夹可粘贴` }),
+    )
+  }, [t])
+
+  const handlePasteInto = useCallback(async (targetFolderId: string | null) => {
+    if (!clipboard) return
+    if (clipboard.kind === 'docs') {
+      if (clipboard.mode === 'cut') {
+        await handleMoveDocuments(clipboard.items, targetFolderId)
+        setClipboard(null)
+        return
+      }
+      try {
+        const res = await api.copyDocuments(clipboard.items, targetFolderId)
+        const folderName = targetFolderId
+          ? folders.find(f => f.id === targetFolderId)?.name ?? ''
+          : t('documents.unfiledDocs', '未归类')
+        toast.success(t('documents.copySuccess', {
+          count: res.copied,
+          folder: folderName,
+          defaultValue: `已复制 ${res.copied} 份文档到「${folderName}」`,
+        }))
+        if (targetFolderId) expandFolderChain(targetFolderId)
+        else setExpandedFolderIds(prev => new Set([...prev, DOC_VIEW_UNFILED]))
+        await load()
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : t('documents.actionFailed', '操作失败'))
+      }
+      return
+    }
+
+    // 文件夹剪切或递归复制
+    const blocked = collectDescendantFolderIds(folders, clipboard.folder.id)
+    if (targetFolderId && blocked.has(targetFolderId)) {
+      toast.warning(t('documents.cannotMoveOrCopyIntoSelf', '不能将文件夹移动或复制到自身及其子文件夹内'))
+      return
+    }
+    if (clipboard.mode === 'cut') {
+      try {
+        const updated = await api.updateDocFolder(clipboard.folder.id, {
+          parentId: targetFolderId,
+          updateParent: true,
+        })
+        setFolders(prev => prev.map(f => (f.id === updated.id ? updated : f)))
+        setClipboard(null)
+        if (updated.parentId) expandFolderChain(updated.parentId)
+        toast.success(t('documents.pasteSuccess', '粘贴完成'))
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : t('documents.actionFailed', '操作失败'))
+      }
+      return
+    }
+
+    try {
+      const res = await api.copyDocFolder(clipboard.folder.id, targetFolderId)
+      toast.success(t('documents.folderCopySuccess', {
+        name: res.rootFolder.name,
+        folders: res.copiedFolders,
+        docs: res.copiedDocs,
+        defaultValue: `已复制文件夹「${res.rootFolder.name}」（含 ${res.copiedFolders} 个目录、${res.copiedDocs} 份文档）`,
+      }))
+      if (targetFolderId) expandFolderChain(targetFolderId)
+      await load()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('documents.actionFailed', '操作失败'))
+    }
+  }, [clipboard, expandFolderChain, folders, handleMoveDocuments, load, t])
 
   const handleToggleCompleted = async (item: BookshelfItem) => {
     const key = `${item.sourceId}\u0000${item.bookUrl}`
@@ -376,7 +499,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
     }
   }
 
-  const handleDelete = async (item: BookshelfItem) => {
+  const handleDelete = useCallback(async (item: BookshelfItem) => {
     if (!window.confirm(t('documents.deleteConfirm', { name: item.name, defaultValue: `确定删除文档《${item.name}》？将同时清除原文件与内嵌图片。` }))) {
       return
     }
@@ -391,9 +514,9 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
     } finally {
       setBusyKey(null)
     }
-  }
+  }, [t])
 
-  const handleDeleteFolder = async (folder: DocFolder) => {
+  const handleDeleteFolder = useCallback(async (folder: DocFolder) => {
     if (!window.confirm(t('documents.folderDeleteConfirm', {
       name: folder.name,
       defaultValue: `确定删除文件夹「${folder.name}」及其子文件夹？其中的文档不会被删除，将自动移回上级目录或「未归类」。`,
@@ -406,12 +529,109 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
       if (deletedSet.has(selectedView)) {
         setSelectedView(folder.parentId ?? DOC_VIEW_ALL)
       }
+      if (clipboard?.kind === 'folder' && deletedSet.has(clipboard.folder.id)) {
+        setClipboard(null)
+      }
       toast.success(t('documents.folderDeleted', { name: folder.name, defaultValue: `已删除文件夹「${folder.name}」` }))
       await load()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('documents.actionFailed', '操作失败'))
     }
-  }
+  }, [clipboard, load, selectedView, t])
+
+  // 全局 Windows 资源管理器快捷键（Ctrl+C / Ctrl+X / Ctrl+V / F2 / Delete / Esc）
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (modal) return
+      const activeEl = document.activeElement
+      if (
+        activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement ||
+        activeEl instanceof HTMLSelectElement ||
+        (activeEl as HTMLElement | null)?.isContentEditable
+      ) {
+        return
+      }
+
+      if (e.key === 'Escape' && clipboard && !contextMenu) {
+        setClipboard(null)
+        return
+      }
+
+      const mod = e.ctrlKey || e.metaKey
+      if (mod && (e.key.toLowerCase() === 'c' || e.key.toLowerCase() === 'x')) {
+        const mode = e.key.toLowerCase() === 'x' ? 'cut' : 'copy'
+        if (batchMode && selectedKeys.size > 0) {
+          const refs: DragDocRef[] = []
+          for (const it of items) {
+            if (selectedKeys.has(`${it.sourceId}\u0000${it.bookUrl}`)) {
+              refs.push({ sourceId: it.sourceId, bookUrl: it.bookUrl })
+            }
+          }
+          if (refs.length > 0) {
+            e.preventDefault()
+            setDocsClipboard(mode, refs, `${refs.length} 份文档`)
+          }
+          return
+        }
+        if (focusedTarget?.kind === 'file') {
+          e.preventDefault()
+          setDocsClipboard(
+            mode,
+            [{ sourceId: focusedTarget.item.sourceId, bookUrl: focusedTarget.item.bookUrl }],
+            focusedTarget.item.name,
+          )
+        } else if (focusedTarget?.kind === 'folder') {
+          e.preventDefault()
+          setFolderClipboard(mode, focusedTarget.folder)
+        } else if (currentFolder) {
+          e.preventDefault()
+          setFolderClipboard(mode, currentFolder)
+        }
+        return
+      }
+
+      if (mod && e.key.toLowerCase() === 'v' && clipboard) {
+        e.preventDefault()
+        void handlePasteInto(activeUploadFolderId)
+        return
+      }
+
+      if (e.key === 'F2' && focusedTarget) {
+        e.preventDefault()
+        if (focusedTarget.kind === 'file') {
+          setModal({ type: 'rename-file', item: focusedTarget.item, name: focusedTarget.item.name })
+        } else {
+          setModal({ type: 'rename', folder: focusedTarget.folder, name: focusedTarget.folder.name })
+        }
+        return
+      }
+
+      if (e.key === 'Delete' && focusedTarget) {
+        e.preventDefault()
+        if (focusedTarget.kind === 'file') void handleDelete(focusedTarget.item)
+        else void handleDeleteFolder(focusedTarget.folder)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [
+    activeUploadFolderId,
+    batchMode,
+    clipboard,
+    contextMenu,
+    currentFolder,
+    focusedTarget,
+    handleDelete,
+    handleDeleteFolder,
+    handlePasteInto,
+    items,
+    modal,
+    selectedKeys,
+    setDocsClipboard,
+    setFolderClipboard,
+  ])
 
   const submitModal = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -526,6 +746,8 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
   // 右键上下文菜单打开与定位
   const openContextMenu = (x: number, y: number, target: ContextMenuTarget) => {
     setOpenMenuKey(null)
+    if (target.kind === 'folder') setFocusedTarget({ kind: 'folder', folder: target.folder })
+    else if (target.kind === 'file') setFocusedTarget({ kind: 'file', item: target.item })
     setContextMenu({ x, y, target })
   }
 
@@ -663,6 +885,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
   const renderTreeFile = (item: BookshelfItem, depth: number) => {
     const fmt = getDocumentFormat(item) ?? 'md'
     const key = `${item.sourceId}\u0000${item.bookUrl}`
+    const isCut = cutDocKeySet.has(key)
     const isContextActive =
       contextMenu?.target.kind === 'file' &&
       contextMenu.target.item.sourceId === item.sourceId &&
@@ -670,7 +893,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
     return (
       <div
         key={`tree-file-${key}`}
-        className={`docs-tree-file${isContextActive ? ' context-active' : ''}`}
+        className={`docs-tree-file${isContextActive ? ' context-active' : ''}${isCut ? ' is-cut' : ''}`}
         style={{ paddingLeft: `${12 + depth * 14 + 18}px` }}
         role="button"
         tabIndex={0}
@@ -679,7 +902,9 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
           e.dataTransfer.effectAllowed = 'move'
           e.dataTransfer.setData(DRAG_DOC_MIME, JSON.stringify([{ sourceId: item.sourceId, bookUrl: item.bookUrl }]))
         }}
+        onFocus={() => setFocusedTarget({ kind: 'file', item })}
         onClick={() => {
+          setFocusedTarget({ kind: 'file', item })
           setContextMenu(null)
           setMobileExplorerOpen(false)
           onOpen(item)
@@ -691,12 +916,6 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
             e.preventDefault()
             setMobileExplorerOpen(false)
             onOpen(item)
-          } else if (e.key === 'F2') {
-            e.preventDefault()
-            setModal({ type: 'rename-file', item, name: item.name })
-          } else if (e.key === 'Delete') {
-            e.preventDefault()
-            void handleDelete(item)
           }
         }}
         title={item.name}
@@ -721,6 +940,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
     const isExpanded = expandedFolderIds.has(node.folder.id)
     const isActive = selectedView === node.folder.id
     const isDropOver = dragTargetView === node.folder.id
+    const isCut = cutFolderId === node.folder.id
     const isContextActive =
       contextMenu?.target.kind === 'folder' && contextMenu.target.folder.id === node.folder.id
     const hasInner = node.children.length > 0 || node.directDocs.length > 0
@@ -728,23 +948,21 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
     return (
       <div key={node.folder.id} className="docs-tree-branch">
         <div
-          className={`docs-tree-row${isActive ? ' active' : ''}${isDropOver ? ' drop-over' : ''}${isContextActive ? ' context-active' : ''}`}
+          className={`docs-tree-row${isActive ? ' active' : ''}${isDropOver ? ' drop-over' : ''}${isContextActive ? ' context-active' : ''}${isCut ? ' is-cut' : ''}`}
           style={{ paddingLeft: `${8 + depth * 14}px` }}
           role="treeitem"
           tabIndex={0}
           aria-expanded={isExpanded}
           aria-selected={isActive}
-          onClick={() => selectView(node.folder.id)}
+          onFocus={() => setFocusedTarget({ kind: 'folder', folder: node.folder })}
+          onClick={() => {
+            setFocusedTarget({ kind: 'folder', folder: node.folder })
+            selectView(node.folder.id)
+          }}
           onContextMenu={e => handleElementContextMenu(e, { kind: 'folder', folder: node.folder })}
           onKeyDown={e => {
             if (e.target !== e.currentTarget) return
-            if (e.key === 'F2') {
-              e.preventDefault()
-              setModal({ type: 'rename', folder: node.folder, name: node.folder.name })
-            } else if (e.key === 'Delete') {
-              e.preventDefault()
-              void handleDeleteFolder(node.folder)
-            } else if (e.key === 'Enter') {
+            if (e.key === 'Enter') {
               e.preventDefault()
               selectView(node.folder.id)
             }
@@ -801,27 +1019,55 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
     if (!contextMenu) return undefined
     const vw = typeof window !== 'undefined' ? window.innerWidth : 1280
     const vh = typeof window !== 'undefined' ? window.innerHeight : 800
-    const estWidth = 232
+    const estWidth = 256
     const estHeight = contextMenu.target.kind === 'file'
-      ? 292
+      ? 360
       : contextMenu.target.kind === 'folder'
-        ? 282
-        : 204
+        ? 360
+        : 240
     const pos = clampContextMenuPosition(contextMenu.x, contextMenu.y, estWidth, estHeight, vw, vh)
     return { left: `${pos.left}px`, top: `${pos.top}px` }
   }, [contextMenu])
+
+  const clipboardLabel = clipboard
+    ? (clipboard.kind === 'folder' ? clipboard.folder.name : clipboard.label)
+    : ''
+
+  const pasteDisabledForTarget = (targetFolderId: string | null): boolean => {
+    if (!clipboard) return true
+    if (clipboard.kind === 'folder' && targetFolderId) {
+      return collectDescendantFolderIds(folders, clipboard.folder.id).has(targetFolderId)
+    }
+    return false
+  }
 
   const renderContextMenu = () => {
     if (!contextMenu) return null
     const target = contextMenu.target
     const itemFolderId = target.kind === 'file' ? getDocumentFolderId(target.item) : null
 
-    return (
+    const pasteTargetId: string | null =
+      target.kind === 'folder'
+        ? target.folder.id
+        : target.kind === 'file'
+          ? itemFolderId
+          : target.kind === 'unfiled'
+            ? null
+            : activeUploadFolderId
+
+    const isPasteDisabled = pasteDisabledForTarget(pasteTargetId)
+    const pasteText = clipboard
+      ? t('documents.pasteNamed', { name: clipboardLabel, defaultValue: `粘贴「${clipboardLabel}」` })
+      : t('documents.paste', '粘贴')
+
+    const menuNode = (
       <div
+        ref={contextMenuRef}
         className="docs-context-menu"
         style={contextMenuStyle}
         role="menu"
         aria-label={t('documents.contextMenuAria', '文档资源管理器右键菜单')}
+        onMouseDown={e => e.stopPropagation()}
         onClick={e => e.stopPropagation()}
         onContextMenu={e => e.preventDefault()}
       >
@@ -870,11 +1116,53 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
               className="docs-context-item"
               onClick={() => {
                 setContextMenu(null)
+                setFolderClipboard('cut', target.folder)
+              }}
+            >
+              <Icon name="scissors" />
+              <span>{t('documents.cut', '剪切')}</span>
+              <kbd className="docs-context-kbd">Ctrl+X</kbd>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                setFolderClipboard('copy', target.folder)
+              }}
+            >
+              <Icon name="copy" />
+              <span>{t('documents.copy', '复制')}</span>
+              <kbd className="docs-context-kbd">Ctrl+C</kbd>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              disabled={isPasteDisabled}
+              onClick={() => {
+                setContextMenu(null)
+                void handlePasteInto(target.folder.id)
+              }}
+            >
+              <Icon name="clipboard" />
+              <span>{pasteText}</span>
+              <kbd className="docs-context-kbd">Ctrl+V</kbd>
+            </button>
+            <div className="docs-context-sep" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
                 setModal({ type: 'rename', folder: target.folder, name: target.folder.name })
               }}
             >
               <Icon name="edit" />
               <span>{t('documents.renameFolder', '重命名文件夹')}</span>
+              <kbd className="docs-context-kbd">F2</kbd>
             </button>
             <button
               type="button"
@@ -904,6 +1192,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
             >
               <Icon name="trash" />
               <span>{t('documents.deleteFolder', '删除文件夹')}</span>
+              <kbd className="docs-context-kbd">Del</kbd>
             </button>
           </>
         )}
@@ -930,11 +1219,53 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
               className="docs-context-item"
               onClick={() => {
                 setContextMenu(null)
+                setDocsClipboard('cut', [{ sourceId: target.item.sourceId, bookUrl: target.item.bookUrl }], target.item.name)
+              }}
+            >
+              <Icon name="scissors" />
+              <span>{t('documents.cut', '剪切')}</span>
+              <kbd className="docs-context-kbd">Ctrl+X</kbd>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                setDocsClipboard('copy', [{ sourceId: target.item.sourceId, bookUrl: target.item.bookUrl }], target.item.name)
+              }}
+            >
+              <Icon name="copy" />
+              <span>{t('documents.copy', '复制')}</span>
+              <kbd className="docs-context-kbd">Ctrl+C</kbd>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              disabled={isPasteDisabled}
+              onClick={() => {
+                setContextMenu(null)
+                void handlePasteInto(itemFolderId)
+              }}
+            >
+              <Icon name="clipboard" />
+              <span>{pasteText}</span>
+              <kbd className="docs-context-kbd">Ctrl+V</kbd>
+            </button>
+            <div className="docs-context-sep" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
                 setModal({ type: 'rename-file', item: target.item, name: target.item.name })
               }}
             >
               <Icon name="edit" />
               <span>{t('documents.renameFile', '重命名文档')}</span>
+              <kbd className="docs-context-kbd">F2</kbd>
             </button>
             <button
               type="button"
@@ -989,6 +1320,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
             >
               <Icon name="trash" />
               <span>{t('documents.deleteFile', '删除文档')}</span>
+              <kbd className="docs-context-kbd">Del</kbd>
             </button>
           </>
         )}
@@ -1036,6 +1368,21 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
               type="button"
               role="menuitem"
               className="docs-context-item"
+              disabled={isPasteDisabled}
+              onClick={() => {
+                setContextMenu(null)
+                void handlePasteInto(null)
+              }}
+            >
+              <Icon name="clipboard" />
+              <span>{pasteText}</span>
+              <kbd className="docs-context-kbd">Ctrl+V</kbd>
+            </button>
+            <div className="docs-context-sep" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
               onClick={() => {
                 setContextMenu(null)
                 toggleExpandFolder(DOC_VIEW_UNFILED)
@@ -1055,11 +1402,11 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
               className="docs-context-item"
               onClick={() => {
                 setContextMenu(null)
-                setModal({ type: 'create', parentId: null, name: '' })
+                setModal({ type: 'create', parentId: activeUploadFolderId, name: '' })
               }}
             >
               <Icon name="folderPlus" />
-              <span>{t('documents.newFolder', '新建文件夹')}</span>
+              <span>{activeUploadFolderId ? t('documents.newSubfolder', '新建子文件夹') : t('documents.newFolder', '新建文件夹')}</span>
             </button>
             <button
               type="button"
@@ -1072,6 +1419,21 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
             >
               <Icon name="upload" />
               <span>{t('documents.uploadBtn', '上传 MD / DOCX')}</span>
+            </button>
+            <div className="docs-context-sep" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              disabled={isPasteDisabled}
+              onClick={() => {
+                setContextMenu(null)
+                void handlePasteInto(activeUploadFolderId)
+              }}
+            >
+              <Icon name="clipboard" />
+              <span>{pasteText}</span>
+              <kbd className="docs-context-kbd">Ctrl+V</kbd>
             </button>
             <div className="docs-context-sep" role="separator" />
             <button
@@ -1114,6 +1476,11 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
         )}
       </div>
     )
+
+    if (typeof document !== 'undefined' && document.body) {
+      return createPortal(menuNode, document.body)
+    }
+    return menuNode
   }
 
   return (
@@ -1158,7 +1525,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
         className="docs-workspace"
         style={{ '--docs-sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
       >
-        {/* 最左侧竖向资源管理器（桌面端拉满界面高度，支持右键菜单与边缘拖宽） */}
+        {/* 最左侧竖向资源管理器（桌面端拉满界面高度，支持 Windows 风格右键与边缘拖宽） */}
         <aside
           className={`docs-sidebar${mobileExplorerOpen ? ' is-open' : ''}${resizingSidebar ? ' is-resizing' : ''}`}
           aria-label={t('documents.explorerTitle', '资源管理器')}
@@ -1184,7 +1551,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                   aria-label={allExpanded ? t('documents.collapseAll', '折叠全部') : t('documents.expandAll', '展开全部')}
                   onClick={() => {
                     if (allExpanded) setExpandedFolderIds(new Set())
-                    else setExpandedFolderIds(new Set(folders.map(f => f.id)))
+                    else setExpandedFolderIds(new Set([...folders.map(f => f.id), DOC_VIEW_UNFILED]))
                   }}
                 >
                   <Icon name={allExpanded ? 'chevronDown' : 'chevronRight'} />
@@ -1202,6 +1569,25 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
             </div>
           </div>
 
+          {clipboard && (
+            <div className="docs-clipboard-banner" role="status">
+              <Icon name={clipboard.mode === 'cut' ? 'scissors' : 'copy'} />
+              <span className="docs-clipboard-text" title={clipboardLabel}>
+                {clipboard.mode === 'cut'
+                  ? t('documents.clipboardBannerCut', { name: clipboardLabel, defaultValue: `待移动：${clipboardLabel}` })
+                  : t('documents.clipboardBannerCopy', { name: clipboardLabel, defaultValue: `已复制：${clipboardLabel}` })}
+              </span>
+              <button
+                type="button"
+                className="docs-clipboard-cancel"
+                onClick={() => setClipboard(null)}
+                aria-label={t('documents.cancelClipboard', '取消')}
+              >
+                {t('documents.cancelClipboard', '取消')}
+              </button>
+            </div>
+          )}
+
           <nav
             className="docs-tree"
             role="tree"
@@ -1214,7 +1600,10 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
               className={`docs-tree-row docs-tree-root${selectedView === DOC_VIEW_ALL ? ' active' : ''}`}
               role="treeitem"
               aria-selected={selectedView === DOC_VIEW_ALL}
-              onClick={() => selectView(DOC_VIEW_ALL)}
+              onClick={() => {
+                setFocusedTarget(null)
+                selectView(DOC_VIEW_ALL)
+              }}
               onContextMenu={e => handleElementContextMenu(e, { kind: 'blank' })}
             >
               <Icon name="book" className="docs-tree-folder-icon" />
@@ -1228,7 +1617,10 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                 role="treeitem"
                 aria-expanded={unfiledExpanded}
                 aria-selected={selectedView === DOC_VIEW_UNFILED}
-                onClick={() => selectView(DOC_VIEW_UNFILED)}
+                onClick={() => {
+                  setFocusedTarget(null)
+                  selectView(DOC_VIEW_UNFILED)
+                }}
                 onContextMenu={e => handleElementContextMenu(e, { kind: 'unfiled' })}
                 onDragOver={e => handleTargetDragOver(e, DOC_VIEW_UNFILED)}
                 onDragLeave={e => {
@@ -1277,8 +1669,13 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
           />
         </aside>
 
-        {/* 右侧文档主界面（风格向书架对齐） */}
-        <div className="docs-main">
+        {/* 右侧文档主界面（空白区同样支持右键，卡片风格对齐书架） */}
+        <div
+          className="docs-main"
+          onContextMenu={e => {
+            if (!modal) handleElementContextMenu(e, { kind: 'blank' })
+          }}
+        >
           <header className="page-title shelf-page-header docs-page-header">
             <div>
               <span className="section-kicker">{t('documents.kicker', '文档阅读')}</span>
@@ -1466,12 +1863,16 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
             <section className="docs-subfolders" aria-label={t('documents.subfoldersLabel', '子文件夹')}>
               {currentSubfolders.map(sub => {
                 const isDropOver = dragTargetView === sub.folder.id
+                const isCut = cutFolderId === sub.folder.id
                 return (
                   <button
                     key={sub.folder.id}
                     type="button"
-                    className={`docs-subfolder-chip${isDropOver ? ' drop-over' : ''}`}
-                    onClick={() => selectView(sub.folder.id)}
+                    className={`docs-subfolder-chip${isDropOver ? ' drop-over' : ''}${isCut ? ' is-cut' : ''}`}
+                    onClick={() => {
+                      setFocusedTarget({ kind: 'folder', folder: sub.folder })
+                      selectView(sub.folder.id)
+                    }}
                     onContextMenu={e => handleElementContextMenu(e, { kind: 'folder', folder: sub.folder })}
                     onDragOver={e => handleTargetDragOver(e, sub.folder.id)}
                     onDragLeave={e => {
@@ -1548,6 +1949,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                 const key = `${item.sourceId}\u0000${item.bookUrl}`
                 const isBusy = busyKey === key
                 const isSelected = selectedKeys.has(key)
+                const isCut = cutDocKeySet.has(key)
                 const menuOpen = openMenuKey === key
                 const itemFolderId = getDocumentFolderId(item)
                 const itemFolderPath = getFolderDisplayPath(folders, itemFolderId)
@@ -1565,14 +1967,14 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                 return (
                   <article
                     key={key}
-                    className={`doc-card${item.completed ? ' is-completed' : ''}${batchMode ? ' batch-selectable' : ''}${isSelected ? ' selected' : ''}`}
+                    className={`doc-card${item.completed ? ' is-completed' : ''}${batchMode ? ' batch-selectable' : ''}${isSelected ? ' selected' : ''}${isCut ? ' is-cut' : ''}`}
                     draggable={!batchMode}
                     onDragStart={e => {
                       if (batchMode) return
                       e.dataTransfer.effectAllowed = 'move'
                       e.dataTransfer.setData(DRAG_DOC_MIME, JSON.stringify([{ sourceId: item.sourceId, bookUrl: item.bookUrl }]))
                     }}
-                    onClick={batchMode ? () => toggleSelectKey(key) : undefined}
+                    onClick={batchMode ? () => toggleSelectKey(key) : () => setFocusedTarget({ kind: 'file', item })}
                     onContextMenu={batchMode ? undefined : e => handleElementContextMenu(e, { kind: 'file', item })}
                   >
                     {/* 无封面紧凑顶部行：文件图标 + 所属文件夹徽签 + MD/DOCX 角标 */}
@@ -1658,7 +2060,29 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                             <Icon name="more" />
                           </button>
                           {menuOpen && (
-                            <div className="doc-more-menu" role="menu">
+                            <div className="doc-more-menu" role="menu" onMouseDown={e => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setOpenMenuKey(null)
+                                  setDocsClipboard('cut', [{ sourceId: item.sourceId, bookUrl: item.bookUrl }], item.name)
+                                }}
+                              >
+                                <Icon name="scissors" />
+                                <span>{t('documents.cut', '剪切')}</span>
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setOpenMenuKey(null)
+                                  setDocsClipboard('copy', [{ sourceId: item.sourceId, bookUrl: item.bookUrl }], item.name)
+                                }}
+                              >
+                                <Icon name="copy" />
+                                <span>{t('documents.copy', '复制')}</span>
+                              </button>
                               <button
                                 type="button"
                                 role="menuitem"
@@ -1733,10 +2157,10 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
         </div>
       </div>
 
-      {/* Windows 风格全局右键菜单 */}
+      {/* Windows 风格全局右键菜单（挂载到 document.body，免裁切） */}
       {renderContextMenu()}
 
-      {/* 批量管理底栏（复用书架浮条样式） */}
+      {/* 批量管理底栏（复用书架浮条样式，含剪切/复制/移动/已读/删除） */}
       {batchMode && selectedRefs.length > 0 && (
         <aside className="shelf-batch-bar" role="toolbar" aria-label={t('shelf.batchToolbar', '批量操作栏')}>
           <div className="shelf-batch-info">
@@ -1758,6 +2182,22 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
             </button>
           </div>
           <div className="shelf-batch-buttons">
+            <button
+              type="button"
+              className="shelf-batch-action-btn"
+              onClick={() => setDocsClipboard('cut', selectedRefs, `${selectedRefs.length} 份文档`)}
+            >
+              <Icon name="scissors" />
+              <span>{t('documents.cut', '剪切')}</span>
+            </button>
+            <button
+              type="button"
+              className="shelf-batch-action-btn"
+              onClick={() => setDocsClipboard('copy', selectedRefs, `${selectedRefs.length} 份文档`)}
+            >
+              <Icon name="copy" />
+              <span>{t('documents.copy', '复制')}</span>
+            </button>
             <button
               type="button"
               className="shelf-batch-action-btn"

@@ -8,6 +8,7 @@ type IconName =
   | 'check'
   | 'chevronDown'
   | 'chevronRight'
+  | 'clipboard'
   | 'close'
   | 'cloudDownload'
   | 'columns'
@@ -32,6 +33,7 @@ type IconName =
   | 'pinOff'
   | 'plus'
   | 'refresh'
+  | 'scissors'
   | 'search'
   | 'settings'
   | 'sliders'
@@ -56,6 +58,7 @@ const paths: Record<IconName, ReactNode> = {
   check: <path d="m5 12 4 4L19 6" />,
   chevronDown: <path d="m6 9 6 6 6-6" />,
   chevronRight: <path d="m9 18 6-6-6-6" />,
+  clipboard: <><rect width="8" height="4" x="8" y="2" rx="1" ry="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /></>,
   close: <path d="m6 6 12 12M18 6 6 18" />,
   // 「网络导入」：云 + 向下的箭头，语义上区别于本地导入用的 upload（托盘 + 上箭头）
   cloudDownload: <><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" /><path d="M12 10.5v5" /><path d="m9.8 13.2 2.2 2.2 2.2-2.2" /></>,
@@ -81,6 +84,7 @@ const paths: Record<IconName, ReactNode> = {
   pinOff: <><line x1="2" y1="2" x2="22" y2="22" /><line x1="12" y1="17" x2="12" y2="22" /><path d="M5 17h14l-2-6V7M9 4h6v2" /></>,
   plus: <path d="M12 5v14M5 12h14" />,
   refresh: <><path d="M3 12a9 9 0 0 1 15-6.7L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" /><path d="M3 21v-5h5" /></>,
+  scissors: <><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><line x1="20" y1="4" x2="8.12" y2="15.88" /><line x1="14.47" y1="14.48" x2="20" y2="20" /><line x1="8.12" y1="8.12" x2="12" y2="12" /></>,
   search: <><circle cx="10.8" cy="10.8" r="6.3" /><path d="m16 16 4.2 4.2" /></>,
   settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.06.06-2.03 2.03-.06-.06a1.8 1.8 0 0 0-1.98-.36 1.8 1.8 0 0 0-1.1 1.65v.09h-2.88v-.09a1.8 1.8 0 0 0-1.1-1.65 1.8 1.8 0 0 0-1.98.36l-.06.06-2.03-2.03.06-.06A1.8 1.8 0 0 0 7 15a1.8 1.8 0 0 0-1.65-1.1h-.09v-2.88h.09A1.8 1.8 0 0 0 7 9.92a1.8 1.8 0 0 0-.36-1.98l-.06-.06 2.03-2.03.06.06a1.8 1.8 0 0 0 1.98.36 1.8 1.8 0 0 0 1.1-1.65v-.09h2.88v.09a1.8 1.8 0 0 0 1.1 1.65 1.8 1.8 0 0 0 1.98-.36l.06-.06 2.03 2.03-.06.06a1.8 1.8 0 0 0-.36 1.98 1.8 1.8 0 0 0 1.65 1.1h.09v2.88h-.09A1.8 1.8 0 0 0 19.4 15Z" /></>,
   sliders: <><path d="M4 6h16M4 12h16M4 18h16" /><circle cx="9" cy="6" r="2" /><circle cx="15" cy="12" r="2" /><circle cx="11" cy="18" r="2" /></>,

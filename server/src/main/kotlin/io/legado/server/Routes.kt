@@ -114,6 +114,90 @@ fun Route.apiRoutes(
     val onlineImport = OnlineImport(database, networkImport::fetchText)
 
     /**
+     * 深拷贝一份本地文档（包括原始 `.md`/`.docx` 文件与独立的 `<bookId>_media/` 内嵌图片副本），
+     * 并落库到目标文件夹。若源文件意外缺失，则从已缓存章节内容自动拼装 Markdown 副本。
+     */
+    fun copyOneLocalDocument(
+        sourceItem: BookshelfItem,
+        targetFolderId: String?,
+        booksDirectory: Path,
+        covers: CoverCache,
+        db: Database,
+    ): BookshelfItem? {
+        val oldBookId = sourceItem.bookUrl.removePrefix("local://").substringBefore('/').trim()
+        if (oldBookId.isEmpty()) return null
+
+        val newBookId = UUID.randomUUID().toString().replace("-", "")
+        val sourceFile = if (Files.isDirectory(booksDirectory)) {
+            Files.list(booksDirectory).use { stream ->
+                stream.filter { path ->
+                    val name = path.fileName.toString()
+                    name.startsWith("$oldBookId.") && Files.isRegularFile(path)
+                }.findFirst().orElse(null)
+            }
+        } else null
+
+        val uniqueTitle = db.pickUniqueDocName(sourceItem.name, targetFolderId)
+        val parsed: ParsedBook
+        val rawBytes: ByteArray
+        val ext: String
+
+        if (sourceFile != null) {
+            rawBytes = Files.readAllBytes(sourceFile)
+            val originalName = sourceFile.fileName.toString()
+            ext = if (originalName.contains('.')) "." + originalName.substringAfterLast('.') else ".md"
+            val reparsed = LocalBookParser.parse(originalName, rawBytes, newBookId)
+            parsed = reparsed.copy(
+                title = uniqueTitle,
+                author = sourceItem.author?.takeIf { it.isNotBlank() } ?: reparsed.author,
+            )
+        } else {
+            val cachedChapters = db.getCachedChaptersFallback(sourceItem.sourceId, sourceItem.bookUrl)
+            val combinedMd = buildString {
+                for (ch in cachedChapters) {
+                    val content = db.cachedContent(sourceItem.sourceId, sourceItem.bookUrl, ch.url)?.content.orEmpty()
+                    val cleanBody = content.trimStart().removePrefix(LocalBookParser.MARKDOWN_CONTENT_MARKER).trim()
+                    if (ch.title.isNotBlank()) {
+                        append("# ").append(ch.title.trim()).append("\n\n")
+                    }
+                    if (cleanBody.isNotEmpty()) {
+                        append(cleanBody).append("\n\n")
+                    }
+                }
+            }.trim().ifEmpty { "# $uniqueTitle\n" }
+            ext = ".md"
+            rawBytes = combinedMd.toByteArray(Charsets.UTF_8)
+            val reparsed = LocalBookParser.parseMarkdown("$uniqueTitle.md", rawBytes)
+            parsed = reparsed.copy(
+                title = uniqueTitle,
+                author = sourceItem.author?.takeIf { it.isNotBlank() } ?: reparsed.author,
+            )
+        }
+
+        runCatching {
+            Files.createDirectories(booksDirectory)
+            Files.write(booksDirectory.resolve("$newBookId$ext"), rawBytes)
+            if (parsed.mediaFiles.isNotEmpty()) {
+                val mediaDir = booksDirectory.resolve("${newBookId}_media")
+                Files.createDirectories(mediaDir)
+                for ((mediaName, mediaBytes) in parsed.mediaFiles) {
+                    Files.write(mediaDir.resolve(mediaName), mediaBytes)
+                }
+            }
+        }
+
+        val coverKey = if (parsed.coverBytes != null && parsed.coverBytes.isNotEmpty()) {
+            covers.saveCoverBytes(
+                parsed.coverBytes,
+                parsed.coverContentType ?: "image/svg+xml",
+                CoverBookRef(parsed.title, LocalBookParser.LOC_BOOK_SOURCE_ID, "local://$newBookId"),
+            )
+        } else sourceItem.coverKey
+
+        return db.importLocalBook(newBookId, parsed, coverKey, targetFolderId)
+    }
+
+    /**
      * 把一本书的字节导入为本地书籍（**两个入口共用**）。
      *
      * 上传入口（`POST /bookshelf/import-local`）与 WebDAV 入口
@@ -2575,6 +2659,67 @@ fun Route.apiRoutes(
                 call.respond(DocFolderAssignResponse(affected))
             } catch (e: NoSuchElementException) {
                 call.respond(HttpStatusCode.NotFound, ApiError("not_found", e.message ?: "目标文件夹不存在"))
+            }
+        }
+        post("/documents/copy") {
+            if (auth.requireSession(call, true) == null) return@post
+            val request = call.receive<DocCopyRequest>()
+            val targetFolderId = request.folderId?.trim()?.takeIf { it.isNotEmpty() }
+            if (targetFolderId != null && database.listDocFolders().none { it.id == targetFolderId }) {
+                call.respond(HttpStatusCode.NotFound, ApiError("not_found", "目标文件夹不存在"))
+                return@post
+            }
+            val shelfByKey = database.listBookshelf().associateBy { it.sourceId to it.bookUrl }
+            val copiedItems = mutableListOf<BookshelfItem>()
+            for (ref in request.items.distinctBy { it.sourceId to it.bookUrl }) {
+                val sourceItem = shelfByKey[ref.sourceId to ref.bookUrl] ?: continue
+                if (sourceItem.sourceId != LocalBookParser.LOC_BOOK_SOURCE_ID || !sourceItem.bookUrl.startsWith("local://")) continue
+                val created = copyOneLocalDocument(
+                    sourceItem = sourceItem,
+                    targetFolderId = targetFolderId,
+                    booksDirectory = localBooksDirectory,
+                    covers = coverCache,
+                    db = database,
+                )
+                if (created != null) copiedItems.add(created)
+            }
+            call.respond(DocCopyResponse(copied = copiedItems.size, items = copiedItems))
+        }
+        post("/documents/folders/{id}/copy") {
+            if (auth.requireSession(call, true) == null) return@post
+            val id = call.parameters["id"]?.trim()?.takeIf { it.isNotEmpty() }
+                ?: return@post call.respond(HttpStatusCode.BadRequest, ApiError("invalid_folder", "缺少文件夹 ID"))
+            val request = runCatching { call.receive<DocFolderCopyRequest>() }.getOrDefault(DocFolderCopyRequest())
+            try {
+                val (newRoot, idMap) = database.duplicateDocFolderSubtree(id, request.targetParentId)
+                val allLocalDocs = database.listBookshelf().filter {
+                    it.sourceId == LocalBookParser.LOC_BOOK_SOURCE_ID && it.bookUrl.startsWith("local://")
+                }
+                var copiedDocs = 0
+                for (doc in allLocalDocs) {
+                    val oldFolder = database.getDocFolderOfItem(doc) ?: continue
+                    val newFolderId = idMap[oldFolder] ?: continue
+                    val created = copyOneLocalDocument(
+                        sourceItem = doc,
+                        targetFolderId = newFolderId,
+                        booksDirectory = localBooksDirectory,
+                        covers = coverCache,
+                        db = database,
+                    )
+                    if (created != null) copiedDocs++
+                }
+                call.respond(
+                    HttpStatusCode.Created,
+                    DocFolderCopyResponse(
+                        rootFolder = newRoot,
+                        copiedFolders = idMap.size,
+                        copiedDocs = copiedDocs,
+                    )
+                )
+            } catch (e: NoSuchElementException) {
+                call.respond(HttpStatusCode.NotFound, ApiError("not_found", e.message ?: "文件夹不存在"))
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ApiError("invalid_folder", e.message ?: "文件夹复制参数不合法"))
             }
         }
         post("/bookshelf/groups") {

@@ -31,6 +31,8 @@ data class ParsedBook(
 data class ParsedChapter(
     val title: String,
     val content: String,
+    val level: Int? = null,
+    val headings: List<ChapterHeading>? = null,
 )
 
 object LocalBookParser {
@@ -361,7 +363,7 @@ object LocalBookParser {
             } else {
                 "$MARKDOWN_CONTENT_MARKER\n$contentBody"
             }
-            ParsedChapter(ch.title, wrapped)
+            ParsedChapter(ch.title, wrapped, ch.level, ch.headings)
         }
 
         val intro = meta["description"]?.takeIf { it.isNotBlank() }
@@ -606,7 +608,7 @@ object LocalBookParser {
         val chapters = rawChapters.map { ch ->
             val contentBody = ch.content.trim()
             val wrapped = if (contentBody.isEmpty()) MARKDOWN_CONTENT_MARKER else "$MARKDOWN_CONTENT_MARKER\n$contentBody"
-            ParsedChapter(ch.title, wrapped)
+            ParsedChapter(ch.title, wrapped, ch.level, ch.headings)
         }
 
         if (intro.isNullOrBlank()) {
@@ -1112,18 +1114,24 @@ object LocalBookParser {
             val preLines = lines.subList(0, firstIdx).filterIndexed { idx, _ -> idx != dropLeadingH1IfSameLine }
             val preText = preLines.joinToString("\n").trim()
             if (preText.isNotEmpty()) {
-                result.add(ParsedChapter("前言", preText))
+                val preHeadings = extractMarkdownSubHeadings(preText).takeIf { it.isNotEmpty() }
+                result.add(ParsedChapter("前言", preText, level = 1, headings = preHeadings))
             }
             for (i in splitHits.indices) {
                 val startLine = splitHits[i].lineIndex + 1
                 val endLine = if (i + 1 < splitHits.size) splitHits[i + 1].lineIndex else lines.size
                 val content = if (startLine < endLine) lines.subList(startLine, endLine).joinToString("\n").trim() else ""
-                val chapterTitle = splitHits[i].title.ifBlank { "第 ${i + 1} 章" }
-                if (content.isNotEmpty() || splitHits.size == 1) {
-                    result.add(ParsedChapter(chapterTitle, content.ifEmpty { chapterTitle }))
-                } else {
-                    result.add(ParsedChapter(chapterTitle, chapterTitle))
-                }
+                val chapterTitle = cleanMarkdownHeadingText(splitHits[i].title).ifBlank { "第 ${i + 1} 章" }
+                val subHeadings = extractMarkdownSubHeadings(content).takeIf { it.isNotEmpty() }
+                val finalContent = if (content.isNotEmpty()) content else chapterTitle
+                result.add(
+                    ParsedChapter(
+                        title = chapterTitle,
+                        content = finalContent,
+                        level = splitHits[i].level,
+                        headings = subHeadings,
+                    )
+                )
             }
             return result
         }
@@ -1173,10 +1181,69 @@ object LocalBookParser {
         return paginateMarkdownSafely(lines, if (h1Hits.size == 1) h1Hits.first().title else fallbackBookTitle)
     }
 
+    /** 清洗 Markdown 标题行中的行内强调/链接/代码/高亮符号，供目录树干净展示。 */
+    internal fun cleanMarkdownHeadingText(raw: String): String {
+        return raw.trim()
+            .replace(Regex("""!\[([^\]]*)\]\([^)]+\)"""), "$1")
+            .replace(Regex("""\[([^\]]+)\]\([^)]+\)"""), "$1")
+            .replace(Regex("""`([^`]+)`"""), "$1")
+            .replace(Regex("""\*\*\*([^*]+)\*\*\*"""), "$1")
+            .replace(Regex("""\*\*([^*]+)\*\*"""), "$1")
+            .replace(Regex("""\*([^*]+)\*"""), "$1")
+            .replace(Regex("""__([^_]+)__"""), "$1")
+            .replace(Regex("""~~([^~]+)~~"""), "$1")
+            .replace(Regex("""==([^=]+)=="""), "$1")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+    }
+
+    /** 提取章节正文内部的 1~6 级 ATX 标题列表（严格跳过围栏代码块，并按出现顺序分配 ordinal）。 */
+    internal fun extractMarkdownSubHeadings(markdownBody: String): List<ChapterHeading> {
+        if (markdownBody.isBlank()) return emptyList()
+        val lines = markdownBody.lines()
+        val result = mutableListOf<ChapterHeading>()
+        var fenceChar: Char? = null
+        var fenceLen = 0
+        var ordinal = 0
+        for (line in lines) {
+            val fence = FENCE_START_REGEX.matchEntire(line)
+            if (fenceChar == null) {
+                if (fence != null) {
+                    fenceChar = fence.groupValues[1][0]
+                    fenceLen = fence.groupValues[1].length
+                    continue
+                }
+            } else {
+                val trimmed = line.trim()
+                if (trimmed.length >= fenceLen && trimmed.all { it == fenceChar }) {
+                    fenceChar = null
+                    fenceLen = 0
+                }
+                continue
+            }
+            val match = ATX_HEADING_REGEX.matchEntire(line) ?: continue
+            val level = match.groupValues[1].length.coerceIn(1, 6)
+            val cleanTitle = cleanMarkdownHeadingText(match.groupValues[2])
+            if (cleanTitle.isNotEmpty()) {
+                result.add(ChapterHeading(level = level, title = cleanTitle, ordinal = ordinal))
+            }
+            ordinal++
+        }
+        return result
+    }
+
     private fun paginateMarkdownSafely(lines: List<String>, singleTitle: String, chunkSize: Int = 6000): List<ParsedChapter> {
         val totalLen = lines.sumOf { it.length + 1 }
         if (totalLen <= chunkSize) {
-            return listOf(ParsedChapter(singleTitle.ifBlank { "正文" }, lines.joinToString("\n").trim()))
+            val bodyText = lines.joinToString("\n").trim()
+            return listOf(
+                ParsedChapter(
+                    title = cleanMarkdownHeadingText(singleTitle).ifBlank { "正文" },
+                    content = bodyText,
+                    level = 1,
+                    headings = extractMarkdownSubHeadings(bodyText).takeIf { it.isNotEmpty() },
+                )
+            )
         }
 
         val chapters = mutableListOf<ParsedChapter>()
@@ -1209,7 +1276,14 @@ object LocalBookParser {
             if (fenceChar == null && !inTableRow && isBlankBoundary && current.length >= chunkSize) {
                 val chunk = current.toString().trim()
                 if (chunk.isNotEmpty()) {
-                    chapters.add(ParsedChapter("第 $page 节", chunk))
+                    chapters.add(
+                        ParsedChapter(
+                            title = "第 $page 节",
+                            content = chunk,
+                            level = 1,
+                            headings = extractMarkdownSubHeadings(chunk).takeIf { it.isNotEmpty() },
+                        )
+                    )
                     page++
                 }
                 current.clear()
@@ -1217,9 +1291,16 @@ object LocalBookParser {
         }
         val tail = current.toString().trim()
         if (tail.isNotEmpty()) {
-            chapters.add(ParsedChapter(if (chapters.isEmpty()) singleTitle.ifBlank { "正文" } else "第 $page 节", tail))
+            chapters.add(
+                ParsedChapter(
+                    title = if (chapters.isEmpty()) cleanMarkdownHeadingText(singleTitle).ifBlank { "正文" } else "第 $page 节",
+                    content = tail,
+                    level = 1,
+                    headings = extractMarkdownSubHeadings(tail).takeIf { it.isNotEmpty() },
+                )
+            )
         }
-        return chapters.ifEmpty { listOf(ParsedChapter(singleTitle.ifBlank { "正文" }, "")) }
+        return chapters.ifEmpty { listOf(ParsedChapter(cleanMarkdownHeadingText(singleTitle).ifBlank { "正文" }, "", level = 1)) }
     }
 
     private fun stripMarkdownForIntro(markdown: String): String {

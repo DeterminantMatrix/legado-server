@@ -35,7 +35,8 @@ export type LocalSearchResponse = { items: LocalSearchHit[]; total: number; trun
 export type ExploreSourceItem = { id: string; name: string; group?: string | null; enabled: boolean }
 export type ExploreCategory = { title: string; url?: string | null; subCategories: ExploreCategory[] }
 export type BookDetails = { sourceId: string; name: string; author?: string; intro?: string; coverUrl?: string; tocUrl: string; bookKind?: string; alternateSources?: SearchResult[]; variables?: Record<string, string> }
-export type Chapter = { index: number; title: string; url: string }
+export type ChapterHeading = { level: number; title: string; ordinal: number }
+export type Chapter = { index: number; title: string; url: string; level?: number | null; headings?: ChapterHeading[] | null }
 export type ReadingProgress = { sourceId: string; bookUrl: string; chapterUrl: string; chapterIndex: number; scrollPosition: number; updatedAt: number; positionMs?: number | null; bookKind?: string }
 /**
  * 一条书签（与备份包 `bookmark.json` 同构）。
@@ -1013,6 +1014,10 @@ export const api = {
     request<{ deletedFolderIds: string[]; movedDocs: number }>(`/api/documents/folders/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   assignDocumentsFolder: (items: { sourceId: string; bookUrl: string }[], folderId: string | null) =>
     request<{ affected: number }>('/api/documents/folder', { method: 'PUT', body: JSON.stringify({ items, folderId }) }),
+  copyDocuments: (items: { sourceId: string; bookUrl: string }[], folderId: string | null) =>
+    request<{ copied: number; items: BookshelfItem[] }>('/api/documents/copy', { method: 'POST', body: JSON.stringify({ items, folderId }) }),
+  copyDocFolder: (id: string, targetParentId: string | null) =>
+    request<{ rootFolder: DocFolder; copiedFolders: number; copiedDocs: number }>(`/api/documents/folders/${encodeURIComponent(id)}/copy`, { method: 'POST', body: JSON.stringify({ targetParentId }) }),
   bookGroups: () => request<BookGroup[]>('/api/bookshelf/groups'),
   createBookGroup: (name: string) => request<BookGroup>('/api/bookshelf/groups', { method: 'POST', body: JSON.stringify({ name }) }),
   renameBookGroup: (oldName: string, newName: string) => request<BookGroup>('/api/bookshelf/groups/rename', { method: 'PUT', body: JSON.stringify({ oldName, newName }) }),

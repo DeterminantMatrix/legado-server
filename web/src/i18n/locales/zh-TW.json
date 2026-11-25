@@ -633,7 +633,10 @@
     "jumpToBookmark": "跳轉到書籤",
     "editBookmark": "編輯書籤",
     "deleteBookmarkTitle": "刪除書籤",
-    "deleteBookmarkMessage": "確認刪除這條書籤？"
+    "deleteBookmarkMessage": "確認刪除這條書籤？",
+    "searchOutline": "搜尋目錄與子標題",
+    "expandOutline": "展開子目錄",
+    "collapseOutline": "折疊子目錄"
   },
   "tts": {
     "title": "聽書設定",
@@ -1639,6 +1642,19 @@
     "refreshExplorer": "重新整理目錄",
     "explorerFooterHint": "右鍵管理資料夾與檔案 · 可拖右緣調寬",
     "resizeSidebarAria": "拖曳調整檔案總管寬度，雙擊恢復預設",
-    "contextMenuAria": "文檔檔案總管右鍵選單"
+    "contextMenuAria": "文檔檔案總管右鍵選單",
+    "cut": "剪下",
+    "copy": "複製",
+    "paste": "貼上",
+    "pasteNamed": "貼上「{{name}}」",
+    "cutToast": "已剪下「{{name}}」，右鍵目標資料夾可貼上",
+    "copyToast": "已複製「{{name}}」，右鍵目標資料夾可貼上",
+    "copySuccess": "已複製 {{count}} 份文檔至「{{folder}}」",
+    "folderCopySuccess": "已複製資料夾「{{name}}」（含 {{folders}} 個目錄、{{docs}} 份文檔）",
+    "pasteSuccess": "貼上完成",
+    "cannotMoveOrCopyIntoSelf": "無法將資料夾移動或複製到自身或其子資料夾內",
+    "clipboardBannerCut": "待移動：{{name}}",
+    "clipboardBannerCopy": "已複製：{{name}}",
+    "cancelClipboard": "取消"
   }
 }

@@ -99,6 +99,27 @@ class DocumentFoldersTest {
             val docUnfiled = db.listBookshelf().first { it.bookUrl == mdItem.bookUrl }
             assertNull(Json.parseToJsonElement(docUnfiled.variable!!).jsonObject["docFolderId"])
 
+            // 6. 文件夹子树复制（重名追加副本后缀 + 防循环复制）与文档同名副本后缀生成
+            val srcParent = db.createDocFolder("归档", null)
+            val srcChild = db.createDocFolder("子卷", srcParent.id)
+            val (dupRoot, idMap) = db.duplicateDocFolderSubtree(srcParent.id, null)
+            assertEquals("归档 - 副本", dupRoot.name)
+            assertEquals(2, idMap.size)
+            val dupChild = db.listDocFolders().firstOrNull { it.id == idMap[srcChild.id] }
+            assertNotNull(dupChild)
+            assertEquals(dupRoot.id, dupChild!!.parentId)
+
+            val cycleCopy = runCatching { db.duplicateDocFolderSubtree(srcParent.id, srcChild.id) }.exceptionOrNull()
+            assertTrue(cycleCopy is IllegalArgumentException)
+
+            val docInFolder = db.importLocalBook(
+                "docdup01",
+                LocalBookParser.parseMarkdown("dup.md", "# 测试".toByteArray()),
+                coverKey = null,
+                docFolderId = dupRoot.id,
+            )
+            assertEquals("${docInFolder.name} - 副本", db.pickUniqueDocName(docInFolder.name, dupRoot.id))
+
             db.close()
         } finally {
             tempDir.toFile().deleteRecursively()

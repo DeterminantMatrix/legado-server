@@ -1,5 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { AppHeader } from '../src/AppHeader'
@@ -267,4 +270,19 @@ test('Documents - folder tree building, breadcrumbs, selection filtering and cyc
   assert.equal(clampSidebarWidth(600), 480)
   assert.equal(clampSidebarWidth(310.4), 310)
   assert.equal(clampSidebarWidth(Number.NaN), DOC_SIDEBAR_DEFAULT_WIDTH)
+
+  // 未归类含文档时默认展开并直接展示未归类文档节点
+  assert.ok(treeHtml.includes('未归档笔记'), '存在未归类文档时左侧树应默认展开展示')
+})
+
+test('Documents - explorer context menu Portal, clipboard styles and keyboard shortcuts contract', () => {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  const pageSrc = fs.readFileSync(path.resolve(here, '../src/DocumentsPage.tsx'), 'utf8')
+  const cssSrc = fs.readFileSync(path.resolve(here, '../src/styles.css'), 'utf8')
+
+  assert.ok(pageSrc.includes('createPortal(menuNode, document.body)'), '右键菜单应通过 createPortal 挂载至 document.body')
+  assert.ok(pageSrc.includes("window.addEventListener('mousedown', closeMenus)"), '外部关闭监听应使用 mousedown 并放行菜单内部点击')
+  assert.ok(pageSrc.includes('api.copyDocuments') && pageSrc.includes('api.copyDocFolder'), '应接入文档与文件夹深拷贝 API')
+  assert.ok(cssSrc.includes('.docs-context-kbd') && cssSrc.includes('.docs-clipboard-banner'), 'styles.css 应定义右键快捷键提示与剪贴板状态栏样式')
+  assert.ok(cssSrc.includes('.reader-outline-list') && cssSrc.includes('.md-heading-flash'), 'styles.css 应定义多级大纲目录与跳转闪光样式')
 })

@@ -415,7 +415,22 @@ data class SourceLoginStateRecord(
     /** `novel` / `comic` / `audio`；前端从搜索页直接开书时用于选择阅读器。 */
     val bookKind: String? = null,
 )
-@Serializable data class Chapter(val index: Int, val title: String, val url: String)
+/** 章节内部提取的子标题大纲条目（供 Markdown / Word 阅读器多级目录跳转）。 */
+@Serializable
+data class ChapterHeading(
+    val level: Int,
+    val title: String,
+    val ordinal: Int = 0,
+)
+
+@Serializable
+data class Chapter(
+    val index: Int,
+    val title: String,
+    val url: String,
+    val level: Int? = null,
+    val headings: List<ChapterHeading>? = null,
+)
 @Serializable data class ContentRequest(val sourceId: String, val chapterUrl: String = "", val bookUrl: String? = null)
 @Serializable data class ChapterContent(
     val title: String? = null,
@@ -1942,5 +1957,29 @@ data class DocFolderAssignRequest(
 @Serializable
 data class DocFolderAssignResponse(
     val affected: Int,
+)
+
+@Serializable
+data class DocCopyRequest(
+    val items: List<DocBookRef>,
+    val folderId: String? = null,
+)
+
+@Serializable
+data class DocCopyResponse(
+    val copied: Int,
+    val items: List<BookshelfItem> = emptyList(),
+)
+
+@Serializable
+data class DocFolderCopyRequest(
+    val targetParentId: String? = null,
+)
+
+@Serializable
+data class DocFolderCopyResponse(
+    val rootFolder: DocFolderRecord,
+    val copiedFolders: Int,
+    val copiedDocs: Int,
 )
 

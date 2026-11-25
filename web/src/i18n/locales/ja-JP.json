@@ -633,7 +633,10 @@
     "jumpToBookmark": "しおりへ移動",
     "editBookmark": "しおりを編集",
     "deleteBookmarkTitle": "しおりを削除",
-    "deleteBookmarkMessage": "このしおりを削除しますか？"
+    "deleteBookmarkMessage": "このしおりを削除しますか？",
+    "searchOutline": "目次と見出しを検索",
+    "expandOutline": "小見出しを展開",
+    "collapseOutline": "小見出しを折りたたむ"
   },
   "tts": {
     "title": "朗読設定",
@@ -1639,6 +1642,19 @@
     "refreshExplorer": "最新の情報に更新",
     "explorerFooterHint": "右クリックで操作 · 右端ドラッグで幅調整",
     "resizeSidebarAria": "ドラッグしてサイドバー幅を調整、ダブルクリックでリセット",
-    "contextMenuAria": "ドキュメントエクスプローラーメニュー"
+    "contextMenuAria": "ドキュメントエクスプローラーメニュー",
+    "cut": "切り取り",
+    "copy": "コピー",
+    "paste": "貼り付け",
+    "pasteNamed": "「{{name}}」を貼り付け",
+    "cutToast": "「{{name}}」を切り取りました。貼り付け先フォルダを右クリックしてください",
+    "copyToast": "「{{name}}」をコピーしました。貼り付け先フォルダを右クリックしてください",
+    "copySuccess": "{{count}} 件のドキュメントを「{{folder}}」にコピーしました",
+    "folderCopySuccess": "フォルダ「{{name}}」をコピーしました（{{folders}} フォルダ・{{docs}} 件）",
+    "pasteSuccess": "貼り付けました",
+    "cannotMoveOrCopyIntoSelf": "フォルダ自身またはサブフォルダ内へ移動・コピーできません",
+    "clipboardBannerCut": "移動待ち：{{name}}",
+    "clipboardBannerCopy": "コピー済み：{{name}}",
+    "cancelClipboard": "キャンセル"
   }
 }

@@ -633,7 +633,10 @@
     "jumpToBookmark": "跳转到书签",
     "editBookmark": "编辑书签",
     "deleteBookmarkTitle": "删除书签",
-    "deleteBookmarkMessage": "确认删除这条书签？"
+    "deleteBookmarkMessage": "确认删除这条书签？",
+    "searchOutline": "搜索目录与子标题",
+    "expandOutline": "展开子目录",
+    "collapseOutline": "折叠子目录"
   },
   "tts": {
     "title": "听书设置",
@@ -1639,6 +1642,19 @@
     "refreshExplorer": "刷新目录",
     "explorerFooterHint": "右键管理文件夹与文件 · 可拖右缘调宽",
     "resizeSidebarAria": "拖动调整资源管理器宽度，双击恢复默认",
-    "contextMenuAria": "文档资源管理器右键菜单"
+    "contextMenuAria": "文档资源管理器右键菜单",
+    "cut": "剪切",
+    "copy": "复制",
+    "paste": "粘贴",
+    "pasteNamed": "粘贴「{{name}}」",
+    "cutToast": "已剪切「{{name}}」，右键目标文件夹可粘贴",
+    "copyToast": "已复制「{{name}}」，右键目标文件夹可粘贴",
+    "copySuccess": "已复制 {{count}} 份文档到「{{folder}}」",
+    "folderCopySuccess": "已复制文件夹「{{name}}」（含 {{folders}} 个目录、{{docs}} 份文档）",
+    "pasteSuccess": "粘贴完成",
+    "cannotMoveOrCopyIntoSelf": "不能将文件夹移动或复制到自身及其子文件夹内",
+    "clipboardBannerCut": "待移动：{{name}}",
+    "clipboardBannerCopy": "已复制：{{name}}",
+    "cancelClipboard": "取消"
   }
 }

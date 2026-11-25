@@ -1,7 +1,7 @@
 import React, { CSSProperties, PointerEvent as ReactPointerEvent, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { api, BookDetails, BookmarkRecord, Chapter, ReadingProgress, SearchResult } from './api'
+import { api, BookDetails, BookmarkRecord, Chapter, ChapterHeading, ReadingProgress, SearchResult } from './api'
 import { Icon } from './icons'
 import { bookmarkOffsetFromPosition, bookmarkPositionFraction, bookmarkSnippet } from './bookmarkPos'
 import { BookmarkListModal } from './BookmarkListModal'
@@ -42,7 +42,13 @@ import { splitIllustrationSegments, stripIllustrations } from './inlineIllustrat
 import type { IllustrationContext } from './inlineIllustrations'
 import { IllustrationLightbox, InlineIllustration } from './ReaderIllustration'
 import { isLocalBook } from './localBook'
-import { isMarkdownBlock, MarkdownBlock } from './markdownReader'
+import {
+  buildDocumentOutline,
+  extractMarkdownHeadings,
+  isAtxHeadingBlock,
+  isMarkdownBlock,
+  MarkdownBlock,
+} from './markdownReader'
 
 export type OpenBook = { details: BookDetails; bookUrl: string; chapters: Chapter[]; progress?: ReadingProgress; bookKind?: string; isDocument?: boolean }
 
@@ -392,6 +398,17 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
   const pendingBookmarkJumpRef = useRef<{ chapterIndex: number; chapterPos: number } | null>(startBookmark ?? null)
   /** 同一章内跳书签时用来把定位 effect 重新跑一遍（内容没变，靠 tick 触发）。 */
   const [bookmarkJumpTick, setBookmarkJumpTick] = useState(0)
+  /** 大纲子标题跳转的待落点（切章或同章定位到具体 ATX 标题序号）。 */
+  const pendingHeadingJumpRef = useRef<{ chapterIndex: number; headingOrdinal: number; crossChapter: boolean } | null>(null)
+  /** 同章内跳大纲子标题时触发重新定位的 tick。 */
+  const [outlineJumpTick, setOutlineJumpTick] = useState(0)
+  /** 跳转到大纲子标题后的短暂高亮闪光 key（`${chapterIndex}-${headingOrdinal}`）。 */
+  const [flashedHeadingKey, setFlashedHeadingKey] = useState<string | null>(null)
+  const flashTimerRef = useRef<number | null>(null)
+  /** 在多级目录中折叠收起子标题的章节索引集合。 */
+  const [collapsedOutlineChapters, setCollapsedOutlineChapters] = useState<Set<number>>(() => new Set())
+  /** 客户端为已加载 Markdown 章节实时补充抽取的多级子标题。 */
+  const [liveHeadingsByChapter, setLiveHeadingsByChapter] = useState<Map<number, ChapterHeading[]>>(() => new Map())
 
   const [cacheStatus, setCacheStatus] = useState<{ state: string; cached: number; total: number; error?: string }>({
     state: 'idle',
@@ -690,6 +707,76 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
     () => scrollText.get(chapterIndex) ?? paragraphs,
     [scrollText, chapterIndex, paragraphs],
   )
+
+  // 组件卸载时清理标题闪烁定时器
+  useEffect(() => () => {
+    if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
+  }, [])
+
+  // 为已渲染的 Markdown 章节实时抽提子标题（兼容旧缓存与单章全文）
+  useEffect(() => {
+    const updates = new Map<number, ChapterHeading[]>()
+    if (paragraphs.length > 0 && isMarkdownBlock(paragraphs[0])) {
+      const hs = extractMarkdownHeadings(paragraphs)
+      if (hs.length > 0) updates.set(chapterIndex, hs)
+    }
+    scrollText.forEach((blocks, idx) => {
+      if (blocks.length > 0 && isMarkdownBlock(blocks[0]) && !updates.has(idx)) {
+        const hs = extractMarkdownHeadings(blocks)
+        if (hs.length > 0) updates.set(idx, hs)
+      }
+    })
+    if (updates.size === 0) return
+    setLiveHeadingsByChapter(prev => {
+      let changed = false
+      const next = new Map(prev)
+      updates.forEach((hs, idx) => {
+        const existing = next.get(idx)
+        if (
+          !existing
+          || existing.length !== hs.length
+          || existing.some((item, i) => item.level !== hs[i].level || item.title !== hs[i].title || item.ordinal !== hs[i].ordinal)
+        ) {
+          next.set(idx, hs)
+          changed = true
+        }
+      })
+      return changed ? next : prev
+    })
+  }, [chapterIndex, paragraphs, scrollText])
+
+  const documentOutline = useMemo(
+    () => buildDocumentOutline(currentBook.chapters, liveHeadingsByChapter),
+    [currentBook.chapters, liveHeadingsByChapter],
+  )
+
+  const hasNestedOutline = useMemo(
+    () => documentOutline.some(item => !item.isChapterRoot || item.depth > 0),
+    [documentOutline],
+  )
+
+  const filteredOutline = useMemo(() => {
+    const query = deferredQuery.trim().toLowerCase()
+    if (!query) {
+      return documentOutline.filter(
+        item => item.isChapterRoot || !collapsedOutlineChapters.has(item.chapterIndex),
+      )
+    }
+    const numQuery = /^\d+$/.test(query) ? parseInt(query, 10) : null
+    const matchingChapterIndices = new Set<number>()
+    const directlyMatched = new Set<string>()
+    for (const item of documentOutline) {
+      const titleHit = item.title.toLowerCase().includes(query)
+      const numHit = item.isChapterRoot && numQuery !== null && (item.chapterIndex === numQuery - 1 || item.chapterIndex === numQuery)
+      if (titleHit || numHit) {
+        directlyMatched.add(item.id)
+        matchingChapterIndices.add(item.chapterIndex)
+      }
+    }
+    return documentOutline.filter(
+      item => directlyMatched.has(item.id) || (item.isChapterRoot && matchingChapterIndices.has(item.chapterIndex)),
+    )
+  }, [collapsedOutlineChapters, deferredQuery, documentOutline])
 
   /**
    * 流里最靠下的一章是否**已经加载完成**（正文在手里，或已收成占位块）。
@@ -1537,14 +1624,23 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
   /**
    * 渲染单个 Markdown 语义块（支持分页/滚动、TTS 高亮与图片放大）。
    */
-  const renderMarkdownBlockItem = (line: string, index: number, interactive = true) => {
+  const renderMarkdownBlockItem = (
+    line: string,
+    index: number,
+    interactive = true,
+    headingOrdinal?: number,
+    blockChapterIndex = chapterIndex,
+  ) => {
     const isLineActive = interactive && ttsActive && activeParagraphIndex === index
+    const isFlashed = headingOrdinal !== undefined && flashedHeadingKey === `${blockChapterIndex}-${headingOrdinal}`
     return (
       <MarkdownBlock
         key={index}
         block={line}
         paragraphIndex={interactive ? index : undefined}
+        headingOrdinal={headingOrdinal}
         isActive={isLineActive}
+        isFlashed={isFlashed}
         onClick={interactive ? () => { if (ttsActive) handleParagraphClick(index) } : undefined}
         highlightText={isLineActive && currentChunk ? currentChunk.text : undefined}
         onOpenImage={(src, alt) => setIllustrationLightbox({ src, alt })}
@@ -1646,6 +1742,42 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
     pendingBookmarkJumpRef.current = { chapterIndex: target, chapterPos: bookmark.chapterPos }
     changeChapter(target, 'auto')
   }, [changeChapter, chapterIndex, content, currentBook.chapters])
+
+  const triggerHeadingFlash = useCallback((targetChIdx: number, ord: number) => {
+    setFlashedHeadingKey(`${targetChIdx}-${ord}`)
+    if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
+    flashTimerRef.current = window.setTimeout(() => {
+      flashTimerRef.current = null
+      setFlashedHeadingKey(null)
+    }, 1500)
+  }, [])
+
+  /** 跳转到目录或二级/三级子标题。 */
+  const jumpToOutlineItem = useCallback((targetChapterIndex: number, headingOrdinal?: number) => {
+    if (!settings.sidebarPinned) {
+      setActiveDrawer(null)
+    }
+    if (headingOrdinal === undefined) {
+      pendingHeadingJumpRef.current = null
+      if (targetChapterIndex !== chapterIndex) {
+        changeChapter(targetChapterIndex, 'first')
+      } else if (settings.pageMode === 'paginate') {
+        setPageIndex(0)
+      } else {
+        targetInitialPageRef.current = 'first'
+        initialPagePositionRef.current = null
+        setBookmarkJumpTick(tick => tick + 1)
+      }
+      return
+    }
+    const crossChapter = targetChapterIndex !== chapterIndex
+    pendingHeadingJumpRef.current = { chapterIndex: targetChapterIndex, headingOrdinal, crossChapter }
+    if (crossChapter) {
+      changeChapter(targetChapterIndex, 'first')
+    } else {
+      setOutlineJumpTick(tick => tick + 1)
+    }
+  }, [changeChapter, chapterIndex, settings.pageMode, settings.sidebarPinned])
 
   // 本地导入书（`loc_book` / `local://`）：正文就在服务端本地库里，没有"下载/缓存"这一步。
   // 用户要求（issue #66）：「本地书根本不要有清除缓存的按钮」「缓存按钮也不该有」——
@@ -1898,6 +2030,11 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
       initialPagePositionRef.current = null
     }
 
+    if (pendingHeadingJumpRef.current?.chapterIndex === chapterIndex) {
+      clearRestoreTarget()
+      return
+    }
+
     /** 目标章区块（ref 未注册时按结构兜底，与注册时机解耦）。 */
     const liveSectionEl = () => scrollSectionRefs.current.get(chapterIndex)
       ?? document.querySelector<HTMLElement>(`.reading-scroll-window > .reading-content[data-chapter-index="${chapterIndex}"]`)
@@ -2037,6 +2174,84 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
     // bookmarkJumpTick 入依赖：同一章内跳书签时内容不变，靠这个 tick 把对齐重跑一遍
   }, [bookmarkJumpTick, chapterIndex, content, loading, scrollStream, settings.pageMode])
 
+  // Scroll mode layout effect for jumping to an outline subheading (H2/H3/H4...)
+  useLayoutEffect(() => {
+    if (settings.pageMode !== 'scroll' || loading || !content) return
+    const pending = pendingHeadingJumpRef.current
+    if (!pending || pending.chapterIndex !== chapterIndex) return
+
+    const TOP_OFFSET = 64
+    let cancelled = false
+    let userInteracted = false
+    let rafId: number | null = null
+    let frames = 0
+
+    const stopWatcher = () => {
+      userInteracted = true
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId)
+        rafId = null
+      }
+      pendingHeadingJumpRef.current = null
+    }
+
+    const findHeadingEl = () => {
+      const section = scrollSectionRefs.current.get(chapterIndex)
+        ?? document.querySelector<HTMLElement>(`.reading-scroll-window > .reading-content[data-chapter-index="${chapterIndex}"]`)
+      return section?.querySelector<HTMLElement>(`[data-md-heading-ordinal="${pending.headingOrdinal}"]`) ?? null
+    }
+
+    if (!pending.crossChapter) {
+      const el = findHeadingEl()
+      if (el) {
+        const targetY = Math.max(0, window.scrollY + el.getBoundingClientRect().top - TOP_OFFSET)
+        lastScrollYRef.current = targetY
+        window.scrollTo({ top: targetY, behavior: 'smooth' })
+        triggerHeadingFlash(chapterIndex, pending.headingOrdinal)
+        pendingHeadingJumpRef.current = null
+        return
+      }
+    }
+
+    window.addEventListener('wheel', stopWatcher, { passive: true, once: true })
+    window.addEventListener('touchstart', stopWatcher, { passive: true, once: true })
+    window.addEventListener('pointerdown', stopWatcher, { passive: true, once: true })
+
+    const guardFrames = pending.crossChapter ? 72 : 12
+    let flashed = false
+    rafId = window.requestAnimationFrame(function locate() {
+      if (cancelled || userInteracted) return
+      frames += 1
+      const el = findHeadingEl()
+      if (el) {
+        const diff = el.getBoundingClientRect().top - TOP_OFFSET
+        if (Math.abs(diff) > 2) {
+          const targetY = Math.max(0, window.scrollY + diff)
+          lastScrollYRef.current = targetY
+          window.scrollTo({ top: targetY, behavior: 'auto' })
+        }
+        if (!flashed) {
+          flashed = true
+          triggerHeadingFlash(chapterIndex, pending.headingOrdinal)
+        }
+      }
+      if (frames < guardFrames) {
+        rafId = window.requestAnimationFrame(locate)
+      } else {
+        rafId = null
+        pendingHeadingJumpRef.current = null
+      }
+    })
+
+    return () => {
+      cancelled = true
+      if (rafId !== null) window.cancelAnimationFrame(rafId)
+      window.removeEventListener('wheel', stopWatcher)
+      window.removeEventListener('touchstart', stopWatcher)
+      window.removeEventListener('pointerdown', stopWatcher)
+    }
+  }, [chapterIndex, content, loading, outlineJumpTick, scrollStream, settings.pageMode, triggerHeadingFlash])
+
   // Pagination measurement
   const measurePagination = useCallback(() => {
     const viewport = viewportRef.current
@@ -2071,7 +2286,11 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
       setChapterTurn('in')
     }
 
-    if (targetInitialPageRef.current === 'last') {
+    if (pendingHeadingJumpRef.current?.chapterIndex === chapterIndex) {
+      targetInitialPageRef.current = null
+      initialPagePositionRef.current = null
+      startChapterTurnIn()
+    } else if (targetInitialPageRef.current === 'last') {
       targetInitialPageRef.current = null
       initialPagePositionRef.current = null
       setPageIndex(layout.pageCount - 1)
@@ -2116,6 +2335,35 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
     measurePagination,
     bookmarkJumpTick,
   ])
+
+  // Paginated mode layout effect for jumping to an outline subheading
+  useLayoutEffect(() => {
+    if (settings.pageMode !== 'paginate' || loading || !content) return
+    const pending = pendingHeadingJumpRef.current
+    if (!pending || pending.chapterIndex !== chapterIndex) return
+    const body = bodyRef.current
+    const viewport = viewportRef.current
+    if (!body || !viewport || viewport.clientWidth <= 0) return
+
+    const liveLayout = calculatePaginationLayout({
+      viewportWidth: viewport.clientWidth,
+      totalScrollWidth: body.scrollWidth,
+      columnGap,
+      columnMode: settings.columnMode,
+    })
+    if (liveLayout.columnWidth !== columnWidth || liveLayout.stride <= 0) return
+
+    const headingEl = body.querySelector<HTMLElement>(`[data-md-heading-ordinal="${pending.headingOrdinal}"]`)
+    if (headingEl) {
+      const offsetLeft = headingEl.getBoundingClientRect().left - body.getBoundingClientRect().left
+      const targetPage = Math.max(0, Math.min(liveLayout.pageCount - 1, Math.floor((offsetLeft + 4) / liveLayout.stride)))
+      setPageIndex(targetPage)
+      triggerHeadingFlash(chapterIndex, pending.headingOrdinal)
+    } else {
+      setPageIndex(0)
+    }
+    pendingHeadingJumpRef.current = null
+  }, [chapterIndex, columnGap, columnWidth, content, loading, outlineJumpTick, pageCount, settings.columnMode, settings.pageMode, stride, triggerHeadingFlash])
 
   /**
    * 跨章过渡的兜底解除。
@@ -2647,22 +2895,80 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
       </header>
       <div className="chapter-search">
         <Icon name="search" />
-        <input value={chapterQuery} onChange={event => setChapterQuery(event.target.value)} placeholder={t('reader.searchChapter', '搜索章节')} />
+        <input
+          value={chapterQuery}
+          onChange={event => setChapterQuery(event.target.value)}
+          placeholder={hasNestedOutline ? t('reader.searchOutline', '搜索目录与子标题') : t('reader.searchChapter', '搜索章节')}
+        />
       </div>
-      <VirtualChapterList
-        chapters={filteredChapters}
-        activeChapterIndex={chapterIndex}
-        cachedUrlsSet={cachedChapterUrls}
-        onSelect={index => {
-          changeChapter(index)
-          if (!settings.sidebarPinned) {
-            setActiveDrawer(null)
-          }
-        }}
-        itemHeight={40}
-        overscan={8}
-        autoScrollKey={activeDrawer === 'toc' || settings.sidebarPinned ? 1 : 0}
-      />
+      {hasNestedOutline ? (
+        <div className="reader-chapters reader-outline-list" role="tree" aria-label={t('reader.toc', '目录')}>
+          {filteredOutline.map(item => {
+            const isCurrentChapter = item.chapterIndex === chapterIndex
+            const isCollapsed = collapsedOutlineChapters.has(item.chapterIndex)
+            const cached = item.isChapterRoot && cachedChapterUrls.has(currentBook.chapters[item.chapterIndex]?.url ?? '')
+            return (
+              <div
+                key={item.id}
+                role="treeitem"
+                aria-level={item.depth + 1}
+                aria-expanded={item.hasChildren ? !isCollapsed : undefined}
+                className={`reader-outline-row depth-${item.depth}${isCurrentChapter && item.isChapterRoot ? ' current' : ''}${isCurrentChapter && !item.isChapterRoot ? ' in-current-chapter' : ''}`}
+              >
+                {item.isChapterRoot && item.hasChildren ? (
+                  <button
+                    type="button"
+                    className="reader-outline-toggle"
+                    aria-label={isCollapsed ? t('reader.expandOutline', '展开子目录') : t('reader.collapseOutline', '折叠子目录')}
+                    onClick={event => {
+                      event.stopPropagation()
+                      setCollapsedOutlineChapters(prev => {
+                        const next = new Set(prev)
+                        if (next.has(item.chapterIndex)) next.delete(item.chapterIndex)
+                        else next.add(item.chapterIndex)
+                        return next
+                      })
+                    }}
+                  >
+                    <Icon name={isCollapsed ? 'chevronRight' : 'chevronDown'} />
+                  </button>
+                ) : (
+                  <span className="reader-outline-spacer" aria-hidden="true">
+                    {!item.isChapterRoot && <span className="reader-outline-dot" />}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="reader-outline-item"
+                  onClick={() => jumpToOutlineItem(item.chapterIndex, item.headingOrdinal)}
+                  title={item.title}
+                >
+                  <span className="reader-chapter-title">{item.title}</span>
+                  {cached && <span className="chapter-cached-badge" title={t('reader.cachedBadge', '已离线缓存')} />}
+                </button>
+              </div>
+            )
+          })}
+          {filteredOutline.length === 0 && (
+            <p className="reader-status" style={{ padding: '24px 0' }}>{t('reader.noMatchingChapters', '无匹配章节')}</p>
+          )}
+        </div>
+      ) : (
+        <VirtualChapterList
+          chapters={filteredChapters}
+          activeChapterIndex={chapterIndex}
+          cachedUrlsSet={cachedChapterUrls}
+          onSelect={index => {
+            changeChapter(index)
+            if (!settings.sidebarPinned) {
+              setActiveDrawer(null)
+            }
+          }}
+          itemHeight={40}
+          overscan={8}
+          autoScrollKey={activeDrawer === 'toc' || settings.sidebarPinned ? 1 : 0}
+        />
+      )}
       <footer className="drawer-footer">
         {/* Cache Control Section
             本地书（`loc_book` / `local://`）**整段不渲染**（issue #66 用户原话：「缓存按钮也不该有」）：
@@ -2858,10 +3164,14 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
                   <h1>{chapter?.title}</h1>
                   {loading && <ReaderContentSkeleton />}
                   {message && <p className="reader-error">{message}</p>}
-                  {paragraphs.map((line, index) => (
-                    isMarkdownBlock(line)
-                      ? renderMarkdownBlockItem(line, index, true)
-                      : (
+                  {(() => {
+                    let mdHeadingSeq = 0
+                    return paragraphs.map((line, index) => {
+                      if (isMarkdownBlock(line)) {
+                        const ord = isAtxHeadingBlock(line) ? mdHeadingSeq++ : undefined
+                        return renderMarkdownBlockItem(line, index, true, ord, chapterIndex)
+                      }
+                      return (
                         <p
                           key={index}
                           data-paragraph-index={index}
@@ -2871,7 +3181,8 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
                           {renderParagraphLine(line, chapter?.url ?? '', chapterIndex, index)}
                         </p>
                       )
-                  ))}
+                    })
+                  })()}
                 </article>
               </div>
             </div>
@@ -2941,11 +3252,16 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
                 />
               )
             }
+            const activeBlocks = entry.isCurrent ? liveScrollParagraphs : entry.paragraphs
+            let mdHeadingSeq = 0
+            const mdHeadingOrdinals = activeBlocks.map(line => (
+              isMarkdownBlock(line) && isAtxHeadingBlock(line) ? mdHeadingSeq++ : undefined
+            ))
             return (
               <article
                 data-chapter-index={entry.index}
                 key={scrollSectionKey(entry.index)}
-                className={`reading-content font-${settings.font}${entry.isCurrent ? '' : ' is-scroll-neighbor'}${(entry.isCurrent ? liveScrollParagraphs : entry.paragraphs).some(isMarkdownBlock) ? ' is-markdown-doc' : ''}`}
+                className={`reading-content font-${settings.font}${entry.isCurrent ? '' : ' is-scroll-neighbor'}${activeBlocks.some(isMarkdownBlock) ? ' is-markdown-doc' : ''}`}
                 ref={getScrollSectionRef(entry.index)}
                 aria-hidden={entry.isCurrent ? undefined : 'true'}
                 onPointerDown={entry.isCurrent ? onPointerDown : undefined}
@@ -2964,7 +3280,7 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
                 {entry.isCurrent
                   ? liveScrollParagraphs.map((line, index) => (
                     isMarkdownBlock(line)
-                      ? renderMarkdownBlockItem(line, index, true)
+                      ? renderMarkdownBlockItem(line, index, true, mdHeadingOrdinals[index], chapterIndex)
                       : (
                         <p
                           key={index}
@@ -2978,7 +3294,7 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
                   ))
                   : entry.paragraphs.map((line, index) => (
                     isMarkdownBlock(line)
-                      ? renderMarkdownBlockItem(line, index, false)
+                      ? renderMarkdownBlockItem(line, index, false, mdHeadingOrdinals[index], entry.index)
                       : (
                         <p key={index} className="reader-paragraph">
                           {/* 相邻章：用**它自己的**章节地址拼代理（否则图会被挂到当前章上）+ 不做朗读高亮 */}

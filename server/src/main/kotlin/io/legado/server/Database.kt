@@ -2761,7 +2761,9 @@ class Database internal constructor(private val spec: DatabaseSpec) : Closeable,
             Chapter(
                 index = idx,
                 title = ch.title,
-                url = "local://$bookId/chapter_${idx + 1}"
+                url = "local://$bookId/chapter_${idx + 1}",
+                level = ch.level,
+                headings = ch.headings?.takeIf { it.isNotEmpty() },
             )
         }
         db.prepareStatement("""
@@ -4660,6 +4662,117 @@ class Database internal constructor(private val spec: DatabaseSpec) : Closeable,
         require(!clean.contains('/') && !clean.contains('\\')) { "文件夹名称不能包含斜杠字符" }
         return clean
     }
+
+    /** 递归复制整个文档文件夹子树到目标父目录，自动生成不重名副本名称并给出新旧目录 ID 映射表。 */
+    fun duplicateDocFolderSubtree(
+        sourceFolderId: String,
+        targetParentId: String? = null,
+    ): Pair<DocFolderRecord, Map<String, String>> = write { db ->
+        val cleanTargetParent = targetParentId?.trim()?.takeIf { it.isNotEmpty() }
+        db.autoCommit = false
+        try {
+            val current = readDocFolders(db).toMutableList()
+            val sourceRoot = current.firstOrNull { it.id == sourceFolderId }
+                ?: throw NoSuchElementException("源文件夹不存在")
+            val subtreeIds = collectFolderSubtreeIds(current, sourceFolderId)
+            if (cleanTargetParent != null) {
+                if (cleanTargetParent in subtreeIds) {
+                    throw IllegalArgumentException("不能将文件夹复制到自身或其子文件夹下")
+                }
+                if (current.none { it.id == cleanTargetParent }) {
+                    throw NoSuchElementException("目标父文件夹不存在")
+                }
+            }
+
+            val siblingNames = current
+                .filter { it.parentId == cleanTargetParent }
+                .map { it.name.lowercase() }
+                .toSet()
+            val newRootName = pickUniqueFolderName(sourceRoot.name, siblingNames)
+
+            val idMap = linkedMapOf<String, String>()
+            val newNodes = mutableListOf<DocFolderRecord>()
+            val baseTime = System.currentTimeMillis()
+            val maxOrder = current.filter { it.parentId == cleanTargetParent }.maxOfOrNull { it.sortOrder } ?: -1
+
+            // BFS 遍历原子树，按父子顺序依次分配新 ID
+            val queue = ArrayDeque<DocFolderRecord>()
+            queue.add(sourceRoot)
+            val seen = mutableSetOf(sourceRoot.id)
+            while (queue.isNotEmpty()) {
+                val orig = queue.removeFirst()
+                val newId = UUID.randomUUID().toString().replace("-", "").take(12)
+                idMap[orig.id] = newId
+                val isRoot = orig.id == sourceRoot.id
+                val mappedParent = if (isRoot) cleanTargetParent else idMap[orig.parentId]
+                val nodeName = if (isRoot) newRootName else orig.name
+                val sortOrder = if (isRoot) maxOrder + 1 else orig.sortOrder
+                newNodes.add(
+                    DocFolderRecord(
+                        id = newId,
+                        name = nodeName,
+                        parentId = mappedParent,
+                        sortOrder = sortOrder,
+                        createdAt = baseTime + newNodes.size,
+                    )
+                )
+                for (child in current.filter { it.parentId == orig.id }) {
+                    if (seen.add(child.id)) queue.add(child)
+                }
+            }
+
+            current.addAll(newNodes)
+            writeDocFolders(db, current)
+            db.commit()
+            newNodes.first() to idMap
+        } catch (e: Throwable) {
+            db.rollback()
+            throw e
+        } finally {
+            db.autoCommit = true
+        }
+    }
+
+    /** 为复制进指定文件夹的文档生成不与同目录既有文档碰撞的唯一名称（自动追加 `- 副本` 后缀）。 */
+    fun pickUniqueDocName(baseName: String, targetFolderId: String?): String = connect { db ->
+        val cleanBase = baseName.trim().ifEmpty { "未命名文档" }
+        val normalizedFolder = targetFolderId?.trim()?.takeIf { it.isNotEmpty() }
+        val existingNames = mutableSetOf<String>()
+        db.prepareStatement("select name, variable from book_shelf where source_id=?").use { stmt ->
+            stmt.setString(1, LocalBookParser.LOC_BOOK_SOURCE_ID)
+            stmt.executeQuery().use { rs ->
+                while (rs.next()) {
+                    val docName = rs.getString(1)?.trim() ?: continue
+                    val vars = parseBookVariables(rs.getString(2))
+                    val folderOfDoc = vars[DOC_FOLDER_VARIABLE_KEY]?.trim()?.takeIf { it.isNotEmpty() }
+                    if (folderOfDoc == normalizedFolder) {
+                        existingNames.add(docName.lowercase())
+                    }
+                }
+            }
+        }
+        if (cleanBase.lowercase() !in existingNames) return@connect cleanBase
+        var index = 1
+        while (true) {
+            val candidate = if (index == 1) "$cleanBase - 副本" else "$cleanBase - 副本 $index"
+            if (candidate.lowercase() !in existingNames) return@connect candidate
+            index++
+        }
+    }
+
+    private fun pickUniqueFolderName(baseName: String, existingLower: Set<String>): String {
+        val cleanBase = baseName.trim().ifEmpty { "新建文件夹" }
+        if (cleanBase.lowercase() !in existingLower) return cleanBase
+        var index = 1
+        while (true) {
+            val candidate = if (index == 1) "$cleanBase - 副本" else "$cleanBase - 副本 $index"
+            if (candidate.lowercase() !in existingLower) return candidate
+            index++
+        }
+    }
+
+    fun getDocFolderOfItem(item: BookshelfItem): String? =
+        parseBookVariables(item.variable)[DOC_FOLDER_VARIABLE_KEY]?.trim()?.takeIf { it.isNotEmpty() }
 
     private fun collectFolderSubtreeIds(folders: List<DocFolderRecord>, rootId: String): Set<String> {
         val result = linkedSetOf(rootId)
