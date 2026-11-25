@@ -194,6 +194,7 @@ export type AutoCacheRunResult = {
 export type ProgressMergeResponse = { source: 'file' | 'database'; progress?: ReadingProgress; fileFound: boolean; alignedIndex?: number }
 export type BookshelfItem = { sourceId: string; bookUrl: string; name: string; author?: string; tocUrl: string; coverKey?: string; coverUrl?: string; chapterIndex?: number; scrollPosition?: number; lastReadAt: number; cachedChapters: number; totalChapters: number; cacheState: 'idle' | 'caching' | 'ready' | 'failed'; cacheError?: string; completed: boolean; alternateSources?: SearchResult[]; groupName?: string; bookKind?: string; variable?: string }
 export type BookshelfWrite = { sourceId: string; bookUrl: string; name: string; author?: string; tocUrl: string; coverUrl?: string; alternateSources?: SearchResult[]; groupName?: string }
+export type DocFolder = { id: string; name: string; parentId?: string | null; sortOrder?: number; createdAt?: number }
 
 /** 漫画清单项（P1）：**只有服务端 key**，上游地址留在服务端（防前端绕过缓存直连）。 */
 export type MangaImageStatus = 'pending' | 'ready' | 'failed'
@@ -983,14 +984,15 @@ export const api = {
   // 省略 = 不动已有变量；传字符串 = 写入。有声书用它切换朗读者/音色。
   updateBookshelfInfo: (data: { sourceId: string; bookUrl: string; name: string; author?: string; coverUrl?: string; coverKey?: string; groupName?: string; alternateSources?: SearchResult[]; customVariable?: string }) => request<BookshelfItem>('/api/bookshelf/info', { method: 'PUT', body: JSON.stringify(data) }),
   switchBookshelfSource: (value: BookshelfSourceSwitch) => request<BookshelfItem>('/api/bookshelf/switch-source', { method: 'POST', body: JSON.stringify(value) }),
-  importLocalBooks: async (files: File[]): Promise<LocalBookImportResponse> => {
+  importLocalBooks: async (files: File[], folderId?: string | null): Promise<LocalBookImportResponse> => {
     const formData = new FormData()
     for (const file of files) {
       formData.append('file', file, file.name)
     }
     const headers = new Headers()
     if (csrfToken) headers.set('X-CSRF-Token', csrfToken)
-    const response = await fetch('/api/bookshelf/import-local', {
+    const query = folderId ? `?folderId=${encodeURIComponent(folderId)}` : ''
+    const response = await fetch(`/api/bookshelf/import-local${query}`, {
       method: 'POST',
       headers,
       credentials: 'same-origin',
@@ -1002,6 +1004,15 @@ export const api = {
     }
     return response.json() as Promise<LocalBookImportResponse>
   },
+  docFolders: () => request<DocFolder[]>('/api/documents/folders'),
+  createDocFolder: (name: string, parentId?: string | null) =>
+    request<DocFolder>('/api/documents/folders', { method: 'POST', body: JSON.stringify({ name, parentId: parentId ?? null }) }),
+  updateDocFolder: (id: string, data: { name?: string; parentId?: string | null; updateParent?: boolean }) =>
+    request<DocFolder>(`/api/documents/folders/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteDocFolder: (id: string) =>
+    request<{ deletedFolderIds: string[]; movedDocs: number }>(`/api/documents/folders/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  assignDocumentsFolder: (items: { sourceId: string; bookUrl: string }[], folderId: string | null) =>
+    request<{ affected: number }>('/api/documents/folder', { method: 'PUT', body: JSON.stringify({ items, folderId }) }),
   bookGroups: () => request<BookGroup[]>('/api/bookshelf/groups'),
   createBookGroup: (name: string) => request<BookGroup>('/api/bookshelf/groups', { method: 'POST', body: JSON.stringify({ name }) }),
   renameBookGroup: (oldName: string, newName: string) => request<BookGroup>('/api/bookshelf/groups/rename', { method: 'PUT', body: JSON.stringify({ oldName, newName }) }),

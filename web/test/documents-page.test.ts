@@ -4,10 +4,18 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { AppHeader } from '../src/AppHeader'
 import { defaultReaderSettings } from '../src/readerSettings'
-import type { BookshelfItem } from '../src/api'
+import type { BookshelfItem, DocFolder } from '../src/api'
 import {
+  buildFolderTree,
+  DOC_VIEW_ALL,
+  DOC_VIEW_UNFILED,
   DOCUMENT_ACCEPT_ATTR,
+  filterDocumentsBySelection,
+  flattenFoldersForSelect,
+  getDocumentFolderId,
   getDocumentFormat,
+  getFolderBreadcrumb,
+  getFolderDisplayPath,
   getLocalBookFormat,
   isDocumentItem,
   isSupportedDocumentFile,
@@ -151,8 +159,91 @@ test('DocumentsPage - renders empty state, upload picker, filters and populated 
   assert.ok(populatedHtml.includes('设计方案'))
   assert.ok(populatedHtml.includes('需求说明书'))
   assert.ok(!populatedHtml.includes('普通TXT小说'), 'TXT小说绝不能混入文档页列表')
+  assert.ok(!populatedHtml.includes('doc-cover'), '文档卡片不得再渲染冗余封面区域')
+  assert.ok(populatedHtml.includes('docs-sidebar'), '应包含左侧竖向资源管理器')
+  assert.ok(populatedHtml.includes('shelf-btn-read'), '主阅读按钮应复用书架风格类')
+  assert.ok(populatedHtml.includes('shelf-btn-manage'), '更多操作按钮应复用书架风格类')
   assert.ok(populatedHtml.includes('doc-badge-md') && populatedHtml.includes('>MD<'))
   assert.ok(populatedHtml.includes('doc-badge-docx') && populatedHtml.includes('>DOCX<'))
   assert.ok(populatedHtml.includes('Markdown (1)'))
   assert.ok(populatedHtml.includes('Word (1)'))
+})
+
+test('Documents - folder tree building, breadcrumbs, selection filtering and cycle safety', () => {
+  const folders: DocFolder[] = [
+    { id: 'f-root', name: '历史档案', parentId: null, sortOrder: 0, createdAt: 10 },
+    { id: 'f-sub', name: '1972-1978', parentId: 'f-root', sortOrder: 0, createdAt: 20 },
+    { id: 'f-leaf', name: '第五章', parentId: 'f-sub', sortOrder: 0, createdAt: 30 },
+    { id: 'f-other', name: '技术专栏', parentId: null, sortOrder: 1, createdAt: 40 },
+  ]
+  const base: BookshelfItem = {
+    sourceId: 'loc_book',
+    bookUrl: 'local://1',
+    name: 'doc',
+    tocUrl: 'local://1/toc',
+    lastReadAt: Date.now(),
+    cachedChapters: 2,
+    totalChapters: 2,
+    cacheState: 'ready',
+    completed: false,
+    bookKind: 'local',
+    variable: JSON.stringify({ localFormat: 'md' }),
+  }
+  const items: BookshelfItem[] = [
+    { ...base, bookUrl: 'local://d1', name: '逐段细纲', variable: JSON.stringify({ localFormat: 'md', docFolderId: 'f-leaf' }) },
+    { ...base, bookUrl: 'local://d2', name: '年表汇总', variable: JSON.stringify({ localFormat: 'docx', docFolderId: 'f-root' }) },
+    { ...base, bookUrl: 'local://d3', name: '未归档笔记', variable: JSON.stringify({ localFormat: 'md' }) },
+    { ...base, bookUrl: 'local://d4', name: '孤儿目录文档', variable: JSON.stringify({ localFormat: 'md', docFolderId: 'missing-id' }) },
+    { ...base, bookUrl: 'local://txt', name: '普通小说', variable: JSON.stringify({ localFormat: 'txt', docFolderId: 'f-root' }) },
+  ]
+
+  assert.equal(getDocumentFolderId(items[0]), 'f-leaf')
+  assert.equal(getDocumentFolderId(items[2]), null)
+  assert.equal(getDocumentFolderId({ variable: '{broken' }), null)
+
+  const tree = buildFolderTree(folders, items)
+  assert.equal(tree.roots.length, 2)
+  assert.equal(tree.unfiledDocs.length, 2) // 未归档笔记 + 孤儿目录文档，不含 TXT
+  assert.equal(tree.nodeMap.get('f-root')?.totalDocCount, 2) // 直属 d2 + 子树 d1
+  assert.equal(tree.nodeMap.get('f-leaf')?.directDocs.length, 1)
+
+  const crumb = getFolderBreadcrumb(folders, 'f-leaf')
+  assert.deepEqual(crumb.map(f => f.name), ['历史档案', '1972-1978', '第五章'])
+  assert.equal(getFolderDisplayPath(folders, 'f-leaf'), '历史档案 / 1972-1978 / 第五章')
+
+  assert.equal(filterDocumentsBySelection(items, folders, DOC_VIEW_ALL).length, 4)
+  assert.equal(filterDocumentsBySelection(items, folders, DOC_VIEW_UNFILED).length, 2)
+  assert.deepEqual(filterDocumentsBySelection(items, folders, 'f-leaf').map(i => i.name), ['逐段细纲'])
+  assert.deepEqual(filterDocumentsBySelection(items, folders, 'nonexistent'), [])
+
+  const flat = flattenFoldersForSelect(folders)
+  assert.deepEqual(flat.map(o => [o.name, o.depth]), [
+    ['历史档案', 0],
+    ['1972-1978', 1],
+    ['第五章', 2],
+    ['技术专栏', 0],
+  ])
+
+  // 异常成环目录防死循环
+  const cyclic: DocFolder[] = [
+    { id: 'a', name: 'A', parentId: 'b' },
+    { id: 'b', name: 'B', parentId: 'a' },
+  ]
+  const cyclicCrumb = getFolderBreadcrumb(cyclic, 'a')
+  assert.ok(cyclicCrumb.length <= 2)
+  const cyclicTree = buildFolderTree(cyclic, [])
+  assert.ok(cyclicTree.roots.length >= 1)
+
+  // SSR 渲染带目录树和文件夹归属的文档页
+  const treeHtml = renderToStaticMarkup(
+    React.createElement(DocumentsPage, {
+      onOpen: () => undefined,
+      initialItems: items,
+      initialFolders: folders,
+    }),
+  )
+  assert.ok(treeHtml.includes('历史档案'))
+  assert.ok(treeHtml.includes('1972-1978'))
+  assert.ok(treeHtml.includes('docs-tree-file'), '展开的文件夹下应列出可直接点击打开的文档文件')
+  assert.ok(treeHtml.includes('doc-folder-pill'), '已归类文档卡片应展示所属文件夹标签')
 })

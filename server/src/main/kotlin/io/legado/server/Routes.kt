@@ -130,6 +130,7 @@ fun Route.apiRoutes(
         booksDirectory: Path,
         covers: CoverCache,
         db: Database,
+        docFolderId: String? = null,
     ): LocalBookImportItem {
         return try {
             // 只接受受支持格式（TXT / EPUB / MD / DOCX）。
@@ -163,7 +164,7 @@ fun Route.apiRoutes(
                 )
             } else null
 
-            val item = db.importLocalBook(bookId, parsed, coverKey)
+            val item = db.importLocalBook(bookId, parsed, coverKey, docFolderId)
             LocalBookImportItem(
                 filename = filename,
                 success = true,
@@ -2019,6 +2020,7 @@ fun Route.apiRoutes(
         }
         post("/bookshelf/import-local") {
             if (auth.requireSession(call, true) == null) return@post
+            val targetFolderId = call.request.queryParameters["folderId"]?.trim()?.takeIf { it.isNotEmpty() }
             val multipart = call.receiveMultipart()
             val items = mutableListOf<LocalBookImportItem>()
             var importedCount = 0
@@ -2028,7 +2030,7 @@ fun Route.apiRoutes(
                     val originalFilename = part.originalFileName ?: "book.txt"
                     val bytes = part.streamProvider().readBytes()
                     if (bytes.isNotEmpty()) {
-                        val item = importOneLocalBook(originalFilename, bytes, localBooksDirectory, coverCache, database)
+                        val item = importOneLocalBook(originalFilename, bytes, localBooksDirectory, coverCache, database, targetFolderId)
                         if (item.success) importedCount++ else failedCount++
                         items.add(item)
                     }
@@ -2519,6 +2521,61 @@ fun Route.apiRoutes(
         get("/bookshelf/groups") {
             if (auth.requireSession(call) == null) return@get
             call.respond(database.listBookGroups())
+        }
+        get("/documents/folders") {
+            if (auth.requireSession(call) == null) return@get
+            call.respond(database.listDocFolders())
+        }
+        post("/documents/folders") {
+            if (auth.requireSession(call, true) == null) return@post
+            val request = call.receive<DocFolderCreateRequest>()
+            try {
+                val created = database.createDocFolder(request.name, request.parentId)
+                call.respond(HttpStatusCode.Created, created)
+            } catch (e: NoSuchElementException) {
+                call.respond(HttpStatusCode.NotFound, ApiError("not_found", e.message ?: "父文件夹不存在"))
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Conflict, ApiError("folder_exists", e.message ?: "同级目录下已存在同名文件夹"))
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ApiError("invalid_folder", e.message ?: "文件夹参数不合法"))
+            }
+        }
+        put("/documents/folders/{id}") {
+            if (auth.requireSession(call, true) == null) return@put
+            val id = call.parameters["id"]?.trim()?.takeIf { it.isNotEmpty() }
+                ?: return@put call.respond(HttpStatusCode.BadRequest, ApiError("invalid_folder", "缺少文件夹 ID"))
+            val request = call.receive<DocFolderUpdateRequest>()
+            try {
+                val updated = database.updateDocFolder(id, request.name, request.parentId, request.updateParent)
+                call.respond(updated)
+            } catch (e: NoSuchElementException) {
+                call.respond(HttpStatusCode.NotFound, ApiError("not_found", e.message ?: "文件夹不存在"))
+            } catch (e: IllegalStateException) {
+                call.respond(HttpStatusCode.Conflict, ApiError("folder_exists", e.message ?: "目标目录下已存在同名文件夹"))
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, ApiError("invalid_folder", e.message ?: "文件夹移动或命名不合法"))
+            }
+        }
+        delete("/documents/folders/{id}") {
+            if (auth.requireSession(call, true) == null) return@delete
+            val id = call.parameters["id"]?.trim()?.takeIf { it.isNotEmpty() }
+                ?: return@delete call.respond(HttpStatusCode.BadRequest, ApiError("invalid_folder", "缺少文件夹 ID"))
+            try {
+                val result = database.deleteDocFolder(id)
+                call.respond(result)
+            } catch (e: NoSuchElementException) {
+                call.respond(HttpStatusCode.NotFound, ApiError("not_found", e.message ?: "文件夹不存在"))
+            }
+        }
+        put("/documents/folder") {
+            if (auth.requireSession(call, true) == null) return@put
+            val request = call.receive<DocFolderAssignRequest>()
+            try {
+                val affected = database.assignDocumentsFolder(request.items, request.folderId)
+                call.respond(DocFolderAssignResponse(affected))
+            } catch (e: NoSuchElementException) {
+                call.respond(HttpStatusCode.NotFound, ApiError("not_found", e.message ?: "目标文件夹不存在"))
+            }
         }
         post("/bookshelf/groups") {
             if (auth.requireSession(call, true) == null) return@post

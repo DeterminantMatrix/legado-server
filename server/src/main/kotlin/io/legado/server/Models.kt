@@ -1898,3 +1898,49 @@ data class AudioDurationRequest(
     val positionMs: Long = 0,
 )
 
+/** 文档库文件夹节点（支持多级 parentId 嵌套，持久化在 `app_setting.doc_folders_v1`）。 */
+@Serializable
+data class DocFolderRecord(
+    val id: String,
+    val name: String,
+    val parentId: String? = null,
+    val sortOrder: Int = 0,
+    val createdAt: Long = 0L,
+)
+
+@Serializable
+data class DocFolderCreateRequest(
+    val name: String,
+    val parentId: String? = null,
+)
+
+@Serializable
+data class DocFolderUpdateRequest(
+    val name: String? = null,
+    val parentId: String? = null,
+    val updateParent: Boolean = false,
+)
+
+@Serializable
+data class DocFolderDeleteResponse(
+    val deletedFolderIds: List<String>,
+    val movedDocs: Int,
+)
+
+@Serializable
+data class DocBookRef(
+    val sourceId: String,
+    val bookUrl: String,
+)
+
+@Serializable
+data class DocFolderAssignRequest(
+    val items: List<DocBookRef>,
+    val folderId: String? = null,
+)
+
+@Serializable
+data class DocFolderAssignResponse(
+    val affected: Int,
+)
+

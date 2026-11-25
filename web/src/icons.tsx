@@ -7,6 +7,7 @@ type IconName =
   | 'bookmark'
   | 'check'
   | 'chevronDown'
+  | 'chevronRight'
   | 'close'
   | 'cloudDownload'
   | 'columns'
@@ -17,6 +18,8 @@ type IconName =
   | 'eyeOff'
   | 'file'
   | 'folder'
+  | 'folderOpen'
+  | 'folderPlus'
   | 'image'
   | 'importFile'
   | 'list'
@@ -52,6 +55,7 @@ const paths: Record<IconName, ReactNode> = {
   bookmark: <path d="M6 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v17l-6-3.6L6 21V4Z" />,
   check: <path d="m5 12 4 4L19 6" />,
   chevronDown: <path d="m6 9 6 6 6-6" />,
+  chevronRight: <path d="m9 18 6-6-6-6" />,
   close: <path d="m6 6 12 12M18 6 6 18" />,
   // 「网络导入」：云 + 向下的箭头，语义上区别于本地导入用的 upload（托盘 + 上箭头）
   cloudDownload: <><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" /><path d="M12 10.5v5" /><path d="m9.8 13.2 2.2 2.2 2.2-2.2" /></>,
@@ -63,6 +67,8 @@ const paths: Record<IconName, ReactNode> = {
   eyeOff: <><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" /><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" /><line x1="2" y1="2" x2="22" y2="22" /></>,
   file: <><path d="M14 3v5h5" /><path d="M15 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-4-5Z" /></>,
   folder: <path d="M4 6a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.6.8l1 1.4H18a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6Z" />,
+  folderOpen: <><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" /></>,
+  folderPlus: <><path d="M12 10v6M9 13h6" /><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" /></>,
   image: <><rect width="18" height="18" x="3" y="3" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /></>,
   importFile: <><path d="M12 3v10" /><path d="m8 9 4 4 4-4" /><path d="M4 15v3a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-3" /></>,
   list: <><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6h.01M4 12h.01M4 18h.01" /></>,

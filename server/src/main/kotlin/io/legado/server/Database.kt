@@ -2,6 +2,7 @@ package io.legado.server
 
 import java.net.URI
 
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -20,6 +21,7 @@ import java.security.SecureRandom
 import java.sql.Connection
 import java.sql.ResultSet
 import java.util.Base64
+import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.locks.ReentrantLock
 import javax.crypto.SecretKeyFactory
@@ -2666,6 +2668,7 @@ class Database internal constructor(private val spec: DatabaseSpec) : Closeable,
         bookId: String,
         parsed: ParsedBook,
         coverKey: String?,
+        docFolderId: String? = null,
     ): BookshelfItem = write { db ->
         db.autoCommit = false
         try {
@@ -2679,7 +2682,12 @@ class Database internal constructor(private val spec: DatabaseSpec) : Closeable,
                 stmt.setString(2, bookUrl)
                 stmt.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
             }
-            val mergedVar = mergeLocalFormatVariable(existingVar, parsed.localFormat)
+            val validFolderId = docFolderId?.trim()?.takeIf { fid ->
+                fid.isNotEmpty() &&
+                    (parsed.localFormat == "md" || parsed.localFormat == "docx") &&
+                    readDocFolders(db).any { it.id == fid }
+            }
+            val mergedVar = mergeLocalFormatVariable(existingVar, parsed.localFormat, validFolderId)
 
             // 1. Insert/update book_shelf
             // `book_kind` 显式写 `local`（issue #66）：本地书自成一类，四类角标（本地/漫画/听书/小说）互斥。
@@ -4436,12 +4444,261 @@ class Database internal constructor(private val spec: DatabaseSpec) : Closeable,
         return saveBookVariables(sourceId, bookUrl, merged)
     }
 
-    /** 合并写入本地格式标记到 `book_shelf.variable`（保留其它已有键，不破坏 custom 等变量）。 */
-    private fun mergeLocalFormatVariable(existing: String?, localFormat: String?): String? {
+    /** 合并写入本地格式标记（及可选文档文件夹归属）到 `book_shelf.variable`（保留其它已有键，不破坏 custom 等变量）。 */
+    private fun mergeLocalFormatVariable(existing: String?, localFormat: String?, docFolderId: String? = null): String? {
         val fmt = localFormat?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return existing?.trim()?.takeIf { it.isNotEmpty() }
         val merged = parseBookVariables(existing).toMutableMap()
         merged["localFormat"] = fmt
+        if (!docFolderId.isNullOrBlank()) {
+            merged[DOC_FOLDER_VARIABLE_KEY] = docFolderId.trim()
+        }
         return Json.encodeToString(merged.toMap())
+    }
+
+    /** 列出文档库文件夹（按 sortOrder、创建时间与名称排序）。 */
+    fun listDocFolders(): List<DocFolderRecord> = connect { db ->
+        readDocFolders(db)
+    }
+
+    /** 创建文档库文件夹（支持指定 parentId 建立多级子目录，禁止同级重名）。 */
+    fun createDocFolder(name: String, parentId: String? = null): DocFolderRecord = write { db ->
+        val cleanName = normalizeDocFolderName(name)
+        val cleanParent = parentId?.trim()?.takeIf { it.isNotEmpty() }
+        db.autoCommit = false
+        try {
+            val current = readDocFolders(db).toMutableList()
+            if (cleanParent != null && current.none { it.id == cleanParent }) {
+                throw NoSuchElementException("父文件夹不存在")
+            }
+            if (current.any { it.parentId == cleanParent && it.name.equals(cleanName, ignoreCase = true) }) {
+                throw IllegalStateException("同级目录下已存在同名文件夹")
+            }
+            val maxOrder = current.filter { it.parentId == cleanParent }.maxOfOrNull { it.sortOrder } ?: -1
+            val created = DocFolderRecord(
+                id = UUID.randomUUID().toString().replace("-", "").take(12),
+                name = cleanName,
+                parentId = cleanParent,
+                sortOrder = maxOrder + 1,
+                createdAt = System.currentTimeMillis(),
+            )
+            current.add(created)
+            writeDocFolders(db, current)
+            db.commit()
+            created
+        } catch (e: Throwable) {
+            db.rollback()
+            throw e
+        } finally {
+            db.autoCommit = true
+        }
+    }
+
+    /** 重命名或移动文件夹位置（带环路检测，防止移动到自身或子孙目录下）。 */
+    fun updateDocFolder(
+        id: String,
+        name: String? = null,
+        parentId: String? = null,
+        updateParent: Boolean = false,
+    ): DocFolderRecord = write { db ->
+        db.autoCommit = false
+        try {
+            val current = readDocFolders(db).toMutableList()
+            val index = current.indexOfFirst { it.id == id }
+            if (index < 0) throw NoSuchElementException("文件夹不存在")
+            val existing = current[index]
+
+            val finalParent = if (updateParent) parentId?.trim()?.takeIf { it.isNotEmpty() } else existing.parentId
+            if (updateParent && finalParent != null) {
+                if (finalParent == id) {
+                    throw IllegalArgumentException("不能将文件夹移动到自身下")
+                }
+                if (current.none { it.id == finalParent }) {
+                    throw NoSuchElementException("目标父文件夹不存在")
+                }
+                val subtree = collectFolderSubtreeIds(current, id)
+                if (finalParent in subtree) {
+                    throw IllegalArgumentException("不能将文件夹移动到自身或其子文件夹下")
+                }
+            }
+
+            val finalName = if (name != null) normalizeDocFolderName(name) else existing.name
+            if (current.any { it.id != id && it.parentId == finalParent && it.name.equals(finalName, ignoreCase = true) }) {
+                throw IllegalStateException("目标目录下已存在同名文件夹")
+            }
+
+            val updated = existing.copy(name = finalName, parentId = finalParent)
+            current[index] = updated
+            writeDocFolders(db, current)
+            db.commit()
+            updated
+        } catch (e: Throwable) {
+            db.rollback()
+            throw e
+        } finally {
+            db.autoCommit = true
+        }
+    }
+
+    /**
+     * 删除文件夹及其所有后代子文件夹；
+     * 该子树下的文档不会被删除，而是安全迁回被删文件夹的父级（若原本为顶层则归入未归类）。
+     */
+    fun deleteDocFolder(id: String): DocFolderDeleteResponse = write { db ->
+        db.autoCommit = false
+        try {
+            val current = readDocFolders(db)
+            val target = current.firstOrNull { it.id == id } ?: throw NoSuchElementException("文件夹不存在")
+            val removedIds = collectFolderSubtreeIds(current, id)
+            val remaining = current.filterNot { it.id in removedIds }
+            val fallbackParentId = target.parentId?.takeIf { pid -> remaining.any { it.id == pid } }
+
+            writeDocFolders(db, remaining)
+
+            var movedDocs = 0
+            val rows = mutableListOf<Triple<String, String, String>>()
+            db.prepareStatement("select source_id, book_url, variable from book_shelf where source_id=? and variable is not null").use { stmt ->
+                stmt.setString(1, LocalBookParser.LOC_BOOK_SOURCE_ID)
+                stmt.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        val sId = rs.getString(1)
+                        val bUrl = rs.getString(2)
+                        val rawVar = rs.getString(3)
+                        if (!rawVar.isNullOrBlank()) rows.add(Triple(sId, bUrl, rawVar))
+                    }
+                }
+            }
+
+            for ((sId, bUrl, rawVar) in rows) {
+                val vars = parseBookVariables(rawVar).toMutableMap()
+                val assigned = vars[DOC_FOLDER_VARIABLE_KEY] ?: continue
+                if (assigned !in removedIds) continue
+                if (fallbackParentId != null) {
+                    vars[DOC_FOLDER_VARIABLE_KEY] = fallbackParentId
+                } else {
+                    vars.remove(DOC_FOLDER_VARIABLE_KEY)
+                }
+                val payload = if (vars.isEmpty()) null else Json.encodeToString(vars.toMap())
+                db.prepareStatement("update book_shelf set variable=? where source_id=? and book_url=?").use { stmt ->
+                    stmt.setString(1, payload)
+                    stmt.setString(2, sId)
+                    stmt.setString(3, bUrl)
+                    if (stmt.executeUpdate() > 0) movedDocs++
+                }
+            }
+
+            db.commit()
+            DocFolderDeleteResponse(
+                deletedFolderIds = removedIds.toList(),
+                movedDocs = movedDocs,
+            )
+        } catch (e: Throwable) {
+            db.rollback()
+            throw e
+        } finally {
+            db.autoCommit = true
+        }
+    }
+
+    /** 批量修改文档所属文件夹（`folderId = null` 或空白表示移出文件夹回到未归类；保留其它变量字段）。 */
+    fun assignDocumentsFolder(items: List<DocBookRef>, folderId: String?): Int = write { db ->
+        if (items.isEmpty()) return@write 0
+        val targetFolderId = folderId?.trim()?.takeIf { it.isNotEmpty() }
+        db.autoCommit = false
+        try {
+            if (targetFolderId != null && readDocFolders(db).none { it.id == targetFolderId }) {
+                throw NoSuchElementException("目标文件夹不存在")
+            }
+            var affected = 0
+            val seen = mutableSetOf<Pair<String, String>>()
+            for (ref in items) {
+                val sId = ref.sourceId.trim()
+                val bUrl = ref.bookUrl.trim()
+                if (sId.isEmpty() || bUrl.isEmpty() || !seen.add(sId to bUrl)) continue
+
+                var found = false
+                var existingVar: String? = null
+                db.prepareStatement("select variable from book_shelf where source_id=? and book_url=?").use { stmt ->
+                    stmt.setString(1, sId)
+                    stmt.setString(2, bUrl)
+                    stmt.executeQuery().use { rs ->
+                        if (rs.next()) {
+                            found = true
+                            existingVar = rs.getString(1)
+                        }
+                    }
+                }
+                if (!found) continue
+
+                val vars = parseBookVariables(existingVar).toMutableMap()
+                if (targetFolderId != null) {
+                    vars[DOC_FOLDER_VARIABLE_KEY] = targetFolderId
+                } else {
+                    vars.remove(DOC_FOLDER_VARIABLE_KEY)
+                }
+                val payload = if (vars.isEmpty()) null else Json.encodeToString(vars.toMap())
+                db.prepareStatement("update book_shelf set variable=? where source_id=? and book_url=?").use { stmt ->
+                    stmt.setString(1, payload)
+                    stmt.setString(2, sId)
+                    stmt.setString(3, bUrl)
+                    if (stmt.executeUpdate() > 0) affected++
+                }
+            }
+            db.commit()
+            affected
+        } catch (e: Throwable) {
+            db.rollback()
+            throw e
+        } finally {
+            db.autoCommit = true
+        }
+    }
+
+    private fun normalizeDocFolderName(raw: String): String {
+        val clean = raw.trim()
+        require(clean.isNotEmpty()) { "文件夹名称不能为空" }
+        require(clean.length <= 80) { "文件夹名称不能超过 80 个字符" }
+        require(!clean.contains('/') && !clean.contains('\\')) { "文件夹名称不能包含斜杠字符" }
+        return clean
+    }
+
+    private fun collectFolderSubtreeIds(folders: List<DocFolderRecord>, rootId: String): Set<String> {
+        val result = linkedSetOf(rootId)
+        val queue = ArrayDeque<String>()
+        queue.add(rootId)
+        while (queue.isNotEmpty()) {
+            val currentId = queue.removeFirst()
+            for (folder in folders) {
+                if (folder.parentId == currentId && result.add(folder.id)) {
+                    queue.add(folder.id)
+                }
+            }
+        }
+        return result
+    }
+
+    private fun readDocFolders(db: Connection): List<DocFolderRecord> {
+        val raw = db.prepareStatement("select value from app_setting where key=?").use { stmt ->
+            stmt.setString(1, DOC_FOLDERS_SETTING_KEY)
+            stmt.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+        }
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            docFolderJson.decodeFromString<List<DocFolderRecord>>(raw)
+                .sortedWith(compareBy<DocFolderRecord> { it.sortOrder }.thenBy { it.createdAt }.thenBy { it.name.lowercase() })
+        }.getOrDefault(emptyList())
+    }
+
+    private fun writeDocFolders(db: Connection, folders: List<DocFolderRecord>) {
+        val payload = docFolderJson.encodeToString(folders)
+        db.prepareStatement(
+            """insert into app_setting(key,value,updated_at) values(?,?,?)
+               on conflict(key) do update set value=excluded.value,updated_at=excluded.updated_at"""
+        ).use { stmt ->
+            stmt.setString(1, DOC_FOLDERS_SETTING_KEY)
+            stmt.setString(2, payload)
+            stmt.setLong(3, System.currentTimeMillis())
+            stmt.executeUpdate()
+        }
     }
 
     /** 容错解析：非法 JSON / 非字符串值一律丢弃（书源写坏了不能把书架读崩）。 */
@@ -5058,6 +5315,9 @@ class Database internal constructor(private val spec: DatabaseSpec) : Closeable,
          * （`🍅大灰狼聚合` 源：`book.getVariable('custom')` 取音色编号）。
          */
         const val CUSTOM_VARIABLE_KEY = "custom"
+        const val DOC_FOLDERS_SETTING_KEY = "doc_folders_v1"
+        const val DOC_FOLDER_VARIABLE_KEY = "docFolderId"
+        private val docFolderJson = Json { ignoreUnknownKeys = true }
 
         private const val SESSION_TTL = 30L * 24 * 60 * 60 * 1000
         /** 漫画章节清单的列顺序必须与 `toMangaChapter()` 的取值下标逐一对齐。 */
