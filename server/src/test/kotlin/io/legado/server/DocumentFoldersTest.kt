@@ -63,7 +63,7 @@ class DocumentFoldersTest {
             assertEquals(subA1Deep.id, afterReparseVars["docFolderId"]?.jsonPrimitive?.content)
 
             // 导入普通 TXT 不应写入 docFolderId
-            val txtParsed = LocalBookParser.parseText("novel.txt", "第1章 开始\n故事开始了".toByteArray())
+            val txtParsed = LocalBookParser.parseTxt("novel.txt", "第1章 开始\n故事开始了".toByteArray())
             val txtItem = db.importLocalBook("txt01", txtParsed, coverKey = null, docFolderId = rootA.id)
             val txtVars = Json.parseToJsonElement(txtItem.variable!!).jsonObject
             assertEquals("txt", txtVars["localFormat"]?.jsonPrimitive?.content)
