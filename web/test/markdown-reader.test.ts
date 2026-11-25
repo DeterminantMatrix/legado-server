@@ -1,5 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { splitParagraphs } from '../src/readerInteractions'
@@ -152,4 +155,39 @@ test('MarkdownReader - adjacent unordered and ordered lists split into separate 
     .join('\n')
   assert.equal(html.includes('<ul '), true)
   assert.equal(html.includes('<ol '), true)
+})
+
+test('MarkdownReader - supports Everforest Clarity ==highlight==, combo highlight and callout blocks', () => {
+  const md = [
+    MARKDOWN_CONTENT_MARKER,
+    '普通 ==默认黄底== 与 **==橙底强调==** 混排。',
+    '',
+    '> [!tip] 实用技巧',
+    '> 这里支持 Obsidian Callout 与 *==绿底高亮==*。',
+  ].join('\n')
+
+  const blocks = splitMarkdownBlocks(md)
+  assert.equal(blocks.length, 2)
+  assert.equal(stripMarkdownForTts(blocks[0]), '普通 默认黄底 与 橙底强调 混排。')
+  assert.equal(stripMarkdownForTts(blocks[1]), '实用技巧。这里支持 Obsidian Callout 与 绿底高亮。')
+
+  const html = blocks
+    .map((block, idx) => renderToStaticMarkup(React.createElement(MarkdownBlock, { key: idx, block })))
+    .join('\n')
+  assert.equal(html.includes('<mark class="md-mark">默认黄底</mark>'), true)
+  assert.equal(html.includes('<strong><mark class="md-mark">橙底强调</mark></strong>'), true)
+  assert.equal(html.includes('md-callout md-callout-aqua'), true)
+  assert.equal(html.includes('<em><mark class="md-mark">绿底高亮</mark></em>'), true)
+})
+
+test('MarkdownReader - styles.css wires Obsidian Everforest Clarity palette tokens cleanly', () => {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  const css = fs.readFileSync(path.resolve(here, '../src/styles.css'), 'utf8')
+  assert.ok(css.includes('--ef-fg: #d3c6aa;'), 'Dark foreground should match Everforest Clarity #d3c6aa')
+  assert.ok(css.includes('--ef-yellow: #dbbc7f;'), 'Dark bold/yellow should match Everforest Clarity #dbbc7f')
+  assert.ok(css.includes('--ef-orange: #e69875;'), 'Dark h1/inline code should match Everforest Clarity #e69875')
+  assert.ok(css.includes('--ef-green: #a7c080;'), 'Dark em/h3 should match Everforest Clarity #a7c080')
+  assert.ok(css.includes('color: var(--ef-yellow);'), 'Bold text should use --ef-yellow')
+  assert.ok(css.includes('color: var(--ef-green);'), 'Italic text should use --ef-green')
+  assert.ok(css.includes('color: var(--ef-orange);'), 'Inline code / H1 should use --ef-orange')
 })

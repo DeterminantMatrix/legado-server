@@ -2831,7 +2831,7 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
               }}
             >
               <div className={`reader-paginated-track ${chapterTurn ? 'is-turning' : ''}`} style={{ transform: `translateX(-${pageIndex * stride}px)` }}>
-                <article ref={bodyRef} className={`reader-paginated-column-body font-${settings.font}`} style={{ columnWidth: `${columnWidth}px`, columnGap: `${columnGap}px` }}>
+                <article ref={bodyRef} className={`reader-paginated-column-body font-${settings.font}${paragraphs.length > 0 && isMarkdownBlock(paragraphs[0]) ? ' is-markdown-doc' : ''}`} style={{ columnWidth: `${columnWidth}px`, columnGap: `${columnGap}px` }}>
                   <h1>{chapter?.title}</h1>
                   {loading && <ReaderContentSkeleton />}
                   {message && <p className="reader-error">{message}</p>}
@@ -2922,7 +2922,7 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
               <article
                 data-chapter-index={entry.index}
                 key={scrollSectionKey(entry.index)}
-                className={`reading-content font-${settings.font}${entry.isCurrent ? '' : ' is-scroll-neighbor'}`}
+                className={`reading-content font-${settings.font}${entry.isCurrent ? '' : ' is-scroll-neighbor'}${(entry.isCurrent ? liveScrollParagraphs : entry.paragraphs).some(isMarkdownBlock) ? ' is-markdown-doc' : ''}`}
                 ref={getScrollSectionRef(entry.index)}
                 aria-hidden={entry.isCurrent ? undefined : 'true'}
                 onPointerDown={entry.isCurrent ? onPointerDown : undefined}

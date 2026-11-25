@@ -192,6 +192,7 @@ function stripInlineMarkdownSyntax(text: string): string {
     .replace(/!\[([^\]]*)\]\([^)]+\)/g, (_, alt: string) => alt.trim())
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/`([^`]+)`/g, '$1')
+    .replace(/==([^=]+)==/g, '$1')
     .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/__([^_]+)__/g, '$1')
@@ -236,6 +237,7 @@ export function stripMarkdownForTts(input: string): string {
     let cleanedLine = trimmed
       .replace(/^#{1,6}\s+/, '')
       .replace(/^>\s*/, '')
+      .replace(/^\[![a-zA-Z]+\][+-]?\s*/, '')
       .replace(/^(?:[-*+]|\d+\.)\s+(?:\[[ xX]\]\s*)?/, '')
     cleanedLine = stripInlineMarkdownSyntax(cleanedLine).replace(/\s+/g, ' ').trim()
     if (cleanedLine) parts.push(cleanedLine)
@@ -317,7 +319,7 @@ export function renderInlineMarkdown(
   }
 
   const TOKEN_RE =
-    /\\([\\`*_{}\[\]()#+\-.!|>~])|`([^`\n]+)`|!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|\*\*\*([^\n*]+?)\*\*\*|\*\*([^\n*]+?)\*\*|__([^\n_]+?)__|~~([^\n~]+?)~~|\*([^\n*]+?)\*|(?<![\w])_([^\n_]+?)_(?![\w])/g
+    /\\([\\`*_{}\[\]()#+\-.!|>~])|`([^`\n]+)`|!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|\*\*\*([^\n*]+?)\*\*\*|\*\*([^\n*]+?)\*\*|__([^\n_]+?)__|~~([^\n~]+?)~~|\*([^\n*]+?)\*|(?<![\w])_([^\n_]+?)_(?![\w])|==([^\n=]+?)==/g
 
   const nodes: React.ReactNode[] = []
   let lastIndex = 0
@@ -375,6 +377,10 @@ export function renderInlineMarkdown(
       const inner = match[11] ?? match[12] ?? ''
       nodes.push(
         <em key={key}>{renderInlineMarkdown(inner, options, depth + 1)}</em>
+      )
+    } else if (match[13] !== undefined) {
+      nodes.push(
+        <mark key={key} className="md-mark">{renderInlineMarkdown(match[13], options, depth + 1)}</mark>
       )
     }
 
@@ -528,9 +534,43 @@ export function MarkdownBlock({
     )
   }
 
-  // 6. 引用块
+  // 6. 引用块 / Obsidian Callout
   if (BLOCKQUOTE_RE.test(firstLine)) {
-    const quoteText = lines.map(l => l.replace(BLOCKQUOTE_RE, '$1')).join('\n')
+    const quoteLines = lines.map(l => l.replace(BLOCKQUOTE_RE, '$1'))
+    const calloutMatch = /^\[!([a-zA-Z]+)\](?:[+-])?\s*(.*)$/.exec(quoteLines[0] ?? '')
+    if (calloutMatch) {
+      const type = calloutMatch[1].toLowerCase()
+      const customTitle = calloutMatch[2].trim()
+      const tone = (() => {
+        if (type === 'tip' || type === 'hint' || type === 'abstract' || type === 'summary' || type === 'tldr') return 'aqua'
+        if (type === 'success' || type === 'check' || type === 'done' || type === 'quote' || type === 'cite') return 'green'
+        if (type === 'question' || type === 'help' || type === 'faq') return 'yellow'
+        if (type === 'warning' || type === 'caution' || type === 'attention' || type === 'important') return 'orange'
+        if (type === 'danger' || type === 'error' || type === 'fail' || type === 'failure' || type === 'missing' || type === 'bug') return 'red'
+        if (type === 'example') return 'purple'
+        return 'blue'
+      })()
+      const titleText = customTitle || (type.charAt(0).toUpperCase() + type.slice(1))
+      const bodyText = quoteLines.slice(1).join('\n').trim()
+      const bodyParas = bodyText ? bodyText.split(/\n{2,}/) : []
+      return wrap(
+        'callout',
+        <div className={`md-callout md-callout-${tone}`}>
+          <div className="md-callout-title">{renderInlineMarkdown(titleText, inlineOpts)}</div>
+          {bodyParas.length > 0 && (
+            <div className="md-callout-body">
+              {bodyParas.map((qp, idx) => (
+                <p key={idx} className="md-blockquote-p">
+                  {renderInlineMarkdown(qp.replace(/\n/g, ' '), inlineOpts)}
+                </p>
+              ))}
+            </div>
+          )}
+        </div>,
+      )
+    }
+
+    const quoteText = quoteLines.join('\n')
     const quoteParas = quoteText.split(/\n{2,}/)
     return wrap(
       'blockquote',
@@ -572,7 +612,14 @@ export function MarkdownBlock({
       'list',
       <ListTag className={`md-list ${isOrdered ? 'md-ol' : 'md-ul'}`}>
         {items.map((item, idx) => (
-          <li key={idx} className={item.checked !== undefined ? 'md-task-item' : 'md-list-item'}>
+          <li
+            key={idx}
+            className={
+              item.checked !== undefined
+                ? `md-task-item${item.checked ? ' is-checked' : ''}`
+                : 'md-list-item'
+            }
+          >
             {item.checked !== undefined && (
               <span className={`md-task-box ${item.checked ? 'is-checked' : ''}`} aria-hidden="true">
                 {item.checked ? '✓' : ''}

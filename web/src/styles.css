@@ -36,6 +36,90 @@ svg { width: 18px; height: 18px; flex: none; }
 .theme-light { --canvas: #f8f9f7; --surface: #ffffff; --surface-muted: #f6f8f5; --ink: #202522; --muted: #7e8780; --line: #e7eae6; --accent: #247a58; --accent-soft: #eaf4ee; --accent-ink: #176145; --danger: #bf4a43; --shadow: 0 12px 30px rgba(24, 36, 28, .08); }
 .theme-paper { --canvas: #eef3e7; --surface: #f8fbf2; --surface-muted: #eef5e8; --ink: #374137; --muted: #768074; --line: #dce5d8; --accent: #4c7d49; --accent-soft: #e3efe0; --accent-ink: #315f36; --danger: #ad5146; --shadow: 0 12px 30px rgba(37, 57, 35, .08); }
 .theme-dark { --canvas: #202522; --surface: #292e2b; --surface-muted: #232825; --ink: #eef1ec; --muted: #a9b0aa; --line: #3b433d; --accent: #67b58d; --accent-soft: #303f35; --accent-ink: #90d7ad; --danger: #f29384; --shadow: 0 12px 30px rgba(0, 0, 0, .25); }
+
+/* Everforest Clarity (Obsidian) 官方色板变量（WCAG AA >= 4.5:1，仅供 Markdown/Word 阅读排版引用） */
+:root,
+.theme-light {
+  --ef-bg-dim: #f8f9f7;
+  --ef-bg0: #f2f4ee;
+  --ef-bg1: #eaeee4;
+  --ef-bg2: #dfe5d8;
+  --ef-bg3: #cfd8c7;
+  --ef-bg-visual: #f0f2d4;
+  --ef-bg-green: #f3f5e4;
+  --ef-fg: #4a5560;
+  --ef-grey0: #8a9488;
+  --ef-grey1: #6f7d6f;
+  --ef-grey2: #5f6b5f;
+  --ef-red: #b02a26;
+  --ef-orange: #a54e16;
+  --ef-yellow: #7d5b00;
+  --ef-green: #586401;
+  --ef-aqua: #20654b;
+  --ef-blue: #2a6f94;
+  --ef-purple: #943c74;
+  --ef-hl-red: #f2c1b0;
+  --ef-hl-orange: #f1cca3;
+  --ef-hl-yellow: #ebd699;
+  --ef-hl-green: #d4d699;
+  --ef-hl-aqua: #bbd8bb;
+  --ef-hl-blue: #bcd3d0;
+  --ef-hl-purple: #ebc7cd;
+}
+.theme-paper {
+  --ef-bg-dim: #efebd4;
+  --ef-bg0: #f8f5e4;
+  --ef-bg1: #f2efdf;
+  --ef-bg2: #e8e5d5;
+  --ef-bg3: #dce0cf;
+  --ef-bg-visual: #f0f2d4;
+  --ef-bg-green: #f3f5e4;
+  --ef-fg: #4a5560;
+  --ef-grey0: #8a9488;
+  --ef-grey1: #6f7d6f;
+  --ef-grey2: #5f6b5f;
+  --ef-red: #b02a26;
+  --ef-orange: #a54e16;
+  --ef-yellow: #7d5b00;
+  --ef-green: #586401;
+  --ef-aqua: #20654b;
+  --ef-blue: #2a6f94;
+  --ef-purple: #943c74;
+  --ef-hl-red: #f2c1b0;
+  --ef-hl-orange: #f1cca3;
+  --ef-hl-yellow: #ebd699;
+  --ef-hl-green: #d4d699;
+  --ef-hl-aqua: #bbd8bb;
+  --ef-hl-blue: #bcd3d0;
+  --ef-hl-purple: #ebc7cd;
+}
+.theme-dark {
+  --ef-bg-dim: #1e2326;
+  --ef-bg0: #272e33;
+  --ef-bg1: #2e383c;
+  --ef-bg2: #374145;
+  --ef-bg3: #414b50;
+  --ef-bg-visual: #493b40;
+  --ef-bg-green: #3c4841;
+  --ef-fg: #d3c6aa;
+  --ef-grey0: #7a8478;
+  --ef-grey1: #859289;
+  --ef-grey2: #9da9a0;
+  --ef-red: #e67e80;
+  --ef-orange: #e69875;
+  --ef-yellow: #dbbc7f;
+  --ef-green: #a7c080;
+  --ef-aqua: #83c092;
+  --ef-blue: #7fbbb3;
+  --ef-purple: #d699b6;
+  --ef-hl-red: #503a3c;
+  --ef-hl-orange: #50403a;
+  --ef-hl-yellow: #444238;
+  --ef-hl-green: #394238;
+  --ef-hl-aqua: #374a41;
+  --ef-hl-blue: #364949;
+  --ef-hl-purple: #4c404a;
+}
 .app-shell { min-height: 100vh; min-height: 100dvh; background: var(--canvas); color: var(--ink); }
 .app-loading { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; color: var(--muted); font-size: 14px; }
 .nav-search-indicator { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--accent); animation: nav-search-pulse 1.4s ease-in-out infinite; }
@@ -7229,23 +7313,35 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
 }
 
 /* ==========================================================================
-   Markdown Reader Typography (Light / Paper / Dark themes + Paginated/Scroll)
+   Markdown Reader Typography (Obsidian Everforest Clarity Palette)
+   严禁在此处写入硬编码十六进制色值，全部通过顶部 --ef-* 主题变量驱动
    ========================================================================== */
+.is-markdown-doc {
+  color: var(--ef-fg);
+}
+.is-markdown-doc h1 {
+  color: var(--ef-orange);
+  font-weight: 700;
+}
+.is-markdown-doc ::selection {
+  background-color: var(--ef-bg-visual);
+}
+
 .md-block {
   margin-bottom: var(--reader-paragraph-spacing);
-  color: var(--ink);
+  color: var(--ef-fg);
   word-break: break-word;
 }
 
 .md-block .md-p {
   margin-bottom: 0;
-  color: var(--ink);
+  color: var(--ef-fg);
   text-align: justify;
 }
 
 .md-heading {
   margin: 0.45em 0 0.15em;
-  color: var(--ink);
+  color: var(--ef-fg);
   font-weight: 650;
   line-height: 1.4;
   text-align: left;
@@ -7253,24 +7349,75 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
 }
 .md-h1 {
   font-size: 1.24em;
+  color: var(--ef-orange);
   padding-bottom: 0.28em;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--ef-bg2);
 }
 .md-h2 {
   font-size: 1.15em;
-  padding-left: 0.5em;
-  border-left: 3px solid var(--accent);
+  color: var(--ef-yellow);
+  padding-bottom: 0.24em;
+  border-bottom: 1px solid var(--ef-bg2);
 }
-.md-h3 { font-size: 1.07em; }
-.md-h4, .md-h5, .md-h6 { font-size: 1em; color: var(--muted); }
+.md-h3 {
+  font-size: 1.07em;
+  color: var(--ef-green);
+}
+.md-h4 {
+  font-size: 1.02em;
+  color: var(--ef-aqua);
+}
+.md-h5 {
+  font-size: 1em;
+  color: var(--ef-blue);
+}
+.md-h6 {
+  font-size: 0.96em;
+  color: var(--ef-purple);
+}
+.md-heading strong {
+  color: inherit;
+}
+
+.md-block strong {
+  color: var(--ef-yellow);
+  font-weight: 650;
+}
+.md-block em {
+  color: var(--ef-green);
+  font-style: italic;
+}
+.md-block del {
+  color: var(--ef-grey1);
+  text-decoration-color: var(--ef-red);
+}
+
+.md-mark {
+  background-color: var(--ef-hl-yellow);
+  color: var(--ef-fg);
+  border-radius: 3px;
+  padding: 0.08em 0.26em;
+  margin: 0 0.02em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.md-block strong > .md-mark:only-child { background-color: var(--ef-hl-orange); }
+.md-block em > .md-mark:only-child { background-color: var(--ef-hl-green); }
+.md-block strong > em > .md-mark:only-child,
+.md-block em > strong > .md-mark:only-child { background-color: var(--ef-hl-aqua); }
+.md-block strong > .md-mark,
+.md-block em > .md-mark,
+.md-mark strong {
+  color: var(--ef-fg);
+}
 
 .md-blockquote {
   margin: 0;
   padding: 0.65em 1em;
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--ef-green);
   border-radius: 0 6px 6px 0;
-  background: color-mix(in srgb, var(--surface-muted) 78%, transparent);
-  color: color-mix(in srgb, var(--ink) 86%, var(--muted));
+  background-color: var(--ef-bg0);
+  color: var(--ef-fg);
   break-inside: avoid;
 }
 .md-blockquote .md-blockquote-p {
@@ -7280,6 +7427,47 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   font-size: 0.96em;
 }
 .md-blockquote .md-blockquote-p:last-child {
+  margin-bottom: 0;
+}
+
+.md-callout {
+  --md-callout-accent: var(--ef-blue);
+  margin: 0;
+  border-radius: 8px;
+  border-left: 3px solid var(--md-callout-accent);
+  background-color: color-mix(in srgb, var(--md-callout-accent) 12%, var(--ef-bg0));
+  overflow: hidden;
+  break-inside: avoid;
+}
+.md-callout-blue { --md-callout-accent: var(--ef-blue); }
+.md-callout-aqua { --md-callout-accent: var(--ef-aqua); }
+.md-callout-green { --md-callout-accent: var(--ef-green); }
+.md-callout-yellow { --md-callout-accent: var(--ef-yellow); }
+.md-callout-orange { --md-callout-accent: var(--ef-orange); }
+.md-callout-red {
+  --md-callout-accent: var(--ef-red);
+  background-color: color-mix(in srgb, var(--md-callout-accent) 8%, var(--ef-bg0));
+}
+.md-callout-purple { --md-callout-accent: var(--ef-purple); }
+.md-callout-title {
+  padding: 0.52em 1em;
+  background-color: color-mix(in srgb, var(--md-callout-accent) 9%, transparent);
+  color: var(--md-callout-accent);
+  font-weight: 650;
+  font-size: 0.94em;
+  text-align: left;
+}
+.md-callout-body {
+  padding: 0.65em 1em 0.75em;
+  color: var(--ef-fg);
+}
+.md-callout-body .md-blockquote-p {
+  margin-bottom: 0.45em;
+  color: inherit;
+  text-align: left;
+  font-size: 0.95em;
+}
+.md-callout-body .md-blockquote-p:last-child {
   margin-bottom: 0;
 }
 
@@ -7297,10 +7485,10 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   position: relative;
   margin: 0;
   padding: 0.9em 1em;
-  border: 1px solid var(--line);
+  border: 1px solid var(--ef-bg2);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-muted) 88%, var(--canvas));
-  color: var(--ink);
+  background-color: var(--ef-bg0);
+  color: var(--ef-fg);
   font-size: 0.85em;
   line-height: 1.55;
   overflow-x: auto;
@@ -7315,8 +7503,8 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   margin-bottom: 0.45em;
   padding: 1px 7px;
   border-radius: 4px;
-  background: var(--accent-soft);
-  color: var(--accent-ink);
+  background-color: var(--ef-bg-green);
+  color: var(--ef-green);
   font-size: 0.78em;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -7330,22 +7518,25 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
 }
 
 .md-inline-code {
-  padding: 0.1em 0.38em;
-  margin: 0 0.1em;
+  padding: 0.12em 0.36em;
+  margin: 0 0.08em;
   border-radius: 4px;
-  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
-  background: color-mix(in srgb, var(--surface-muted) 88%, var(--canvas));
-  color: var(--accent-ink);
+  border: 1px solid var(--ef-bg2);
+  background-color: var(--ef-bg1);
+  color: var(--ef-orange);
   font-size: 0.88em;
 }
 
 .md-list {
   margin: 0;
   padding-left: 1.45em;
-  color: var(--ink);
+  color: var(--ef-fg);
 }
 .md-ul { list-style-type: disc; }
 .md-ol { list-style-type: decimal; }
+.md-list li::marker {
+  color: var(--ef-aqua);
+}
 .md-list-item,
 .md-task-item {
   margin-bottom: 0.35em;
@@ -7363,31 +7554,36 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   align-items: baseline;
   gap: 0.5em;
 }
+.md-task-item.is-checked {
+  color: var(--ef-grey1);
+  text-decoration: line-through;
+  text-decoration-color: var(--ef-grey0);
+}
 .md-task-box {
   display: inline-grid;
   place-items: center;
   width: 1.05em;
   height: 1.05em;
   flex: none;
-  border: 1.5px solid var(--muted);
+  border: 1.5px solid var(--ef-grey0);
   border-radius: 3px;
   font-size: 0.78em;
   line-height: 1;
   color: transparent;
 }
 .md-task-box.is-checked {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--surface);
+  border-color: var(--ef-green);
+  background: var(--ef-green);
+  color: var(--ef-bg-dim);
 }
 
 .md-table-wrap {
   width: 100%;
   max-width: 100%;
   overflow-x: auto;
-  border: 1px solid var(--line);
+  border: 1px solid var(--ef-bg2);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--ef-bg-dim);
   break-inside: avoid;
 }
 .md-table {
@@ -7400,9 +7596,9 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
 .md-table th,
 .md-table td {
   padding: 0.5em 0.75em;
-  border-bottom: 1px solid var(--line);
-  border-right: 1px solid var(--line);
-  color: var(--ink);
+  border-bottom: 1px solid var(--ef-bg2);
+  border-right: 1px solid var(--ef-bg2);
+  color: var(--ef-fg);
   vertical-align: top;
 }
 .md-table th:last-child,
@@ -7413,26 +7609,28 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   border-bottom: 0;
 }
 .md-table thead th {
-  background: color-mix(in srgb, var(--surface-muted) 92%, var(--canvas));
+  background: var(--ef-bg1);
+  color: var(--ef-yellow);
   font-weight: 650;
 }
 .md-table tbody tr:nth-child(even) {
-  background: color-mix(in srgb, var(--surface-muted) 45%, transparent);
+  background: var(--ef-bg0);
 }
 
 .md-hr {
   border: 0;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--ef-bg2);
   margin: 0.6em 0;
 }
 
 .md-link {
-  color: var(--accent);
-  text-decoration: underline;
+  color: var(--ef-aqua);
+  text-decoration: none;
   text-underline-offset: 3px;
 }
 .md-link:hover {
-  color: var(--accent-ink);
+  color: var(--ef-green);
+  text-decoration: underline;
 }
 
 .md-figure {
@@ -7454,14 +7652,14 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   height: auto;
   margin: 0 auto;
   border-radius: 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--ef-bg2);
 }
 .reader-paginated-column-body .md-block-img {
   max-height: calc(100dvh - 200px);
 }
 .md-figcaption {
   margin-top: 0.45em;
-  color: var(--muted);
+  color: var(--ef-grey2);
   font-size: 0.82em;
 }
 
