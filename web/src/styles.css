@@ -7702,16 +7702,18 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
 
 .docs-workspace {
   display: grid;
-  grid-template-columns: 268px minmax(0, 1fr);
-  gap: 24px;
+  grid-template-columns: var(--docs-sidebar-width, 268px) minmax(0, 1fr);
+  gap: 20px;
   align-items: start;
 }
 
-/* 左侧竖向资源管理器 */
+/* 左侧竖向资源管理器（拉满可视高度 + 主题滚动条 + 右缘可拖宽手柄） */
 .docs-sidebar {
   position: sticky;
-  top: 76px;
-  max-height: calc(100dvh - 104px);
+  top: 72px;
+  height: calc(100dvh - 104px);
+  min-height: 520px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
@@ -7719,6 +7721,10 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   background: var(--surface);
   overflow: hidden;
   box-shadow: var(--shadow);
+  transition: border-color 0.16s ease;
+}
+.docs-sidebar.is-resizing {
+  border-color: var(--accent);
 }
 .docs-sidebar-header {
   display: flex;
@@ -7728,6 +7734,7 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   padding: 11px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--surface-muted);
+  flex: none;
 }
 .docs-sidebar-title {
   font-size: 12px;
@@ -7750,22 +7757,54 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
 
 .docs-tree {
   flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 8px 6px 12px;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   align-content: start;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 32%, transparent) transparent;
 }
+.docs-tree::-webkit-scrollbar,
+.docs-move-list::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.docs-tree::-webkit-scrollbar-track,
+.docs-move-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.docs-tree::-webkit-scrollbar-thumb,
+.docs-move-list::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 28%, transparent);
+  border-radius: 999px;
+}
+.docs-tree::-webkit-scrollbar-thumb:hover,
+.docs-move-list::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--accent) 55%, var(--muted));
+}
+.docs-tree::-webkit-scrollbar-corner,
+.docs-move-list::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 .docs-tree-branch,
 .docs-tree-children {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
+  min-width: 0;
 }
 
 .docs-tree-row {
   display: flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
   min-height: 32px;
   padding: 4px 8px;
   border-radius: 7px;
@@ -7783,6 +7822,12 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   background: var(--accent-soft);
   color: var(--accent-ink);
   font-weight: 600;
+}
+.docs-tree-row.context-active,
+.docs-tree-file.context-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--ink);
 }
 .docs-tree-row.drop-over {
   border-color: var(--accent);
@@ -7848,7 +7893,9 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   flex: none;
 }
 .docs-tree-row:hover .docs-tree-row-actions,
-.docs-tree-row.active .docs-tree-row-actions {
+.docs-tree-row:focus-within .docs-tree-row-actions,
+.docs-tree-row.active .docs-tree-row-actions,
+.docs-tree-row.context-active .docs-tree-row-actions {
   display: inline-flex;
 }
 
@@ -7863,6 +7910,7 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+  flex: none;
 }
 .docs-tree-icon-btn:hover {
   background: color-mix(in srgb, var(--ink) 8%, transparent);
@@ -7881,14 +7929,16 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   min-height: 29px;
   padding: 3px 8px;
   border-radius: 6px;
+  border: 1px solid transparent;
   font-size: 12.5px;
   color: var(--muted);
   cursor: pointer;
   user-select: none;
-  transition: background-color 0.14s ease, color 0.14s ease;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
 }
 .docs-tree-file:hover {
   background: var(--surface-muted);
@@ -7906,6 +7956,115 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   padding: 1px 4px;
   border-radius: 3px;
   letter-spacing: 0.03em;
+  flex: none;
+}
+.docs-tree-more-btn {
+  width: 20px;
+  height: 20px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.docs-tree-file:hover .docs-tree-more-btn,
+.docs-tree-file:focus-within .docs-tree-more-btn,
+.docs-tree-file.context-active .docs-tree-more-btn {
+  opacity: 1;
+}
+
+.docs-sidebar-footer {
+  flex: none;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-muted);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 与界面融合的侧栏右缘拖拽调宽手柄 */
+.docs-sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 4;
+  display: flex;
+  justify-content: flex-end;
+}
+.docs-sidebar-resizer::after {
+  content: '';
+  width: 2px;
+  height: 100%;
+  background: transparent;
+  transition: background-color 0.15s ease;
+}
+.docs-sidebar-resizer:hover::after,
+.docs-sidebar-resizer.is-resizing::after {
+  background: var(--accent);
+}
+
+/* Windows 资源管理器风格右键上下文菜单 */
+.docs-context-menu {
+  position: fixed;
+  z-index: 260;
+  min-width: 210px;
+  max-width: 280px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 2px;
+}
+.docs-context-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.docs-context-item:hover {
+  background: var(--surface-muted);
+}
+.docs-context-item.danger {
+  color: var(--danger);
+}
+.docs-context-item.danger:hover {
+  background: color-mix(in srgb, var(--danger) 11%, transparent);
+}
+.docs-context-item svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--muted);
+}
+.docs-context-item.danger svg {
+  color: var(--danger);
+}
+.docs-context-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
+}
+
+.docs-filter-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--line);
   flex: none;
 }
 
@@ -8276,6 +8435,9 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   gap: 6px;
   max-height: 320px;
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 32%, transparent) transparent;
 }
 .docs-move-option {
   width: 100%;
@@ -8362,6 +8524,8 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
     left: 0;
     bottom: 0;
     width: min(300px, 84vw);
+    height: 100dvh;
+    min-height: 0;
     max-height: 100dvh;
     z-index: 130;
     border-radius: 0 12px 12px 0;
@@ -8373,6 +8537,10 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   }
   .docs-sidebar-close {
     display: grid !important;
+  }
+  .docs-sidebar-resizer,
+  .docs-sidebar-footer {
+    display: none;
   }
 }
 

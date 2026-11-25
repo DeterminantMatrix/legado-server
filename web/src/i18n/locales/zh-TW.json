@@ -1623,6 +1623,22 @@
     "batchCompletedUpdated": "已批次更新閱讀狀態",
     "rootFolderHint": "移出所有資料夾，放回「未歸類」",
     "moreActions": "更多操作",
-    "parentFolderLabel": "所在位置：{{path}}"
+    "parentFolderLabel": "所在位置：{{path}}",
+    "openFolder": "開啟資料夾",
+    "openRead": "開啟閱讀",
+    "uploadToFolder": "上傳文檔到此資料夾",
+    "moveFolder": "移動資料夾到...",
+    "folderMoved": "已移動資料夾「{{name}}」",
+    "topLevelFolder": "頂層目錄（根目錄）",
+    "topLevelFolderHint": "作為頂層資料夾顯示在檔案總管根目錄",
+    "renameFile": "重新命名文檔",
+    "fileNamePlaceholder": "輸入新的文檔名稱",
+    "fileNameEmpty": "文檔名稱不能為空",
+    "fileRenamed": "文檔已重新命名為「{{name}}」",
+    "deleteFile": "刪除文檔",
+    "refreshExplorer": "重新整理目錄",
+    "explorerFooterHint": "右鍵管理資料夾與檔案 · 可拖右緣調寬",
+    "resizeSidebarAria": "拖曳調整檔案總管寬度，雙擊恢復預設",
+    "contextMenuAria": "文檔檔案總管右鍵選單"
   }
 }

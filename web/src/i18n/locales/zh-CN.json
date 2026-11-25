@@ -1623,6 +1623,22 @@
     "batchCompletedUpdated": "已批量更新阅读状态",
     "rootFolderHint": "移出所有文件夹，放回「未归类」",
     "moreActions": "更多操作",
-    "parentFolderLabel": "所在位置：{{path}}"
+    "parentFolderLabel": "所在位置：{{path}}",
+    "openFolder": "打开文件夹",
+    "openRead": "打开阅读",
+    "uploadToFolder": "上传文档到此文件夹",
+    "moveFolder": "移动文件夹到...",
+    "folderMoved": "已移动文件夹「{{name}}」",
+    "topLevelFolder": "顶层目录（根目录）",
+    "topLevelFolderHint": "作为顶层文件夹显示在资源管理器根目录",
+    "renameFile": "重命名文档",
+    "fileNamePlaceholder": "输入新的文档名称",
+    "fileNameEmpty": "文档名称不能为空",
+    "fileRenamed": "文档已重命名为「{{name}}」",
+    "deleteFile": "删除文档",
+    "refreshExplorer": "刷新目录",
+    "explorerFooterHint": "右键管理文件夹与文件 · 可拖右缘调宽",
+    "resizeSidebarAria": "拖动调整资源管理器宽度，双击恢复默认",
+    "contextMenuAria": "文档资源管理器右键菜单"
   }
 }

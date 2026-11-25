@@ -7,6 +7,9 @@ export type LocalBookFormat = 'txt' | 'epub' | DocumentFormat
 export const DOCUMENT_ACCEPT_ATTR = '.md,.markdown,.docx'
 export const DOC_VIEW_ALL = '__all__'
 export const DOC_VIEW_UNFILED = '__unfiled__'
+export const DOC_SIDEBAR_DEFAULT_WIDTH = 268
+export const DOC_SIDEBAR_MIN_WIDTH = 200
+export const DOC_SIDEBAR_MAX_WIDTH = 480
 
 export type DocFolderNode = {
   folder: DocFolder
@@ -253,4 +256,64 @@ export function flattenFoldersForSelect(folders: DocFolder[]): DocFolderSelectOp
     walk(root, 0, [])
   }
   return options
+}
+
+/**
+ * 收集文件夹自身及其全部后代子文件夹 ID（含 visited 防环保护），
+ * 用于「移动文件夹到…」时剔除自身及子孙节点防止循环嵌套。
+ */
+export function collectDescendantFolderIds(folders: DocFolder[], rootId: string): Set<string> {
+  const result = new Set<string>([rootId])
+  const childrenByParent = new Map<string, string[]>()
+  for (const f of folders) {
+    const pid = f.parentId?.trim()
+    if (!pid) continue
+    const list = childrenByParent.get(pid)
+    if (list) list.push(f.id)
+    else childrenByParent.set(pid, [f.id])
+  }
+  const queue = [rootId]
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    const children = childrenByParent.get(current)
+    if (!children) continue
+    for (const cid of children) {
+      if (!result.has(cid)) {
+        result.add(cid)
+        queue.push(cid)
+      }
+    }
+  }
+  return result
+}
+
+/** 计算固定定位右键菜单的安全视口坐标，贴近右缘或底缘时自动向内翻转/夹紧。 */
+export function clampContextMenuPosition(
+  x: number,
+  y: number,
+  menuWidth: number,
+  menuHeight: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  margin = 8,
+): { left: number; top: number } {
+  const safeX = Number.isFinite(x) ? x : margin
+  const safeY = Number.isFinite(y) ? y : margin
+  const maxLeft = Math.max(margin, viewportWidth - menuWidth - margin)
+  const maxTop = Math.max(margin, viewportHeight - menuHeight - margin)
+  const left = safeX + menuWidth + margin > viewportWidth
+    ? Math.max(margin, Math.min(safeX - menuWidth, maxLeft))
+    : Math.max(margin, Math.min(safeX, maxLeft))
+  const top = safeY + menuHeight + margin > viewportHeight
+    ? Math.max(margin, Math.min(safeY - menuHeight, maxTop))
+    : Math.max(margin, Math.min(safeY, maxTop))
+  return { left, top }
+}
+
+/** 将资源管理器侧栏宽度夹紧在 [200, 480] 区间；非法值安全回退默认值 268。 */
+export function clampSidebarWidth(width: unknown): number {
+  if (typeof width !== 'number' || !Number.isFinite(width)) {
+    return DOC_SIDEBAR_DEFAULT_WIDTH
+  }
+  return Math.min(DOC_SIDEBAR_MAX_WIDTH, Math.max(DOC_SIDEBAR_MIN_WIDTH, Math.round(width)))
 }

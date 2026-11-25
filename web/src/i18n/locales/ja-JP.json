@@ -1623,6 +1623,22 @@
     "batchCompletedUpdated": "読書ステータスを更新しました",
     "rootFolderHint": "フォルダから出して「未分類」に戻す",
     "moreActions": "その他の操作",
-    "parentFolderLabel": "場所: {{path}}"
+    "parentFolderLabel": "場所: {{path}}",
+    "openFolder": "フォルダを開く",
+    "openRead": "リーダーで開く",
+    "uploadToFolder": "このフォルダにアップロード",
+    "moveFolder": "フォルダを移動...",
+    "folderMoved": "フォルダ「{{name}}」を移動しました",
+    "topLevelFolder": "最上位（ルート）",
+    "topLevelFolderHint": "エクスプローラーのルート直下に配置",
+    "renameFile": "ドキュメント名を変更",
+    "fileNamePlaceholder": "新しいドキュメント名を入力",
+    "fileNameEmpty": "ドキュメント名を入力してください",
+    "fileRenamed": "ドキュメント名を「{{name}}」に変更しました",
+    "deleteFile": "ドキュメントを削除",
+    "refreshExplorer": "最新の情報に更新",
+    "explorerFooterHint": "右クリックで操作 · 右端ドラッグで幅調整",
+    "resizeSidebarAria": "ドラッグしてサイドバー幅を調整、ダブルクリックでリセット",
+    "contextMenuAria": "ドキュメントエクスプローラーメニュー"
   }
 }

@@ -1623,6 +1623,22 @@
     "batchCompletedUpdated": "Updated reading status",
     "rootFolderHint": "Move out of folders into Unfiled",
     "moreActions": "More actions",
-    "parentFolderLabel": "Location: {{path}}"
+    "parentFolderLabel": "Location: {{path}}",
+    "openFolder": "Open Folder",
+    "openRead": "Open Reader",
+    "uploadToFolder": "Upload to This Folder",
+    "moveFolder": "Move Folder to...",
+    "folderMoved": "Moved folder \"{{name}}\"",
+    "topLevelFolder": "Top Level (Root)",
+    "topLevelFolderHint": "Place directly under explorer root",
+    "renameFile": "Rename Document",
+    "fileNamePlaceholder": "Enter new document title",
+    "fileNameEmpty": "Document title cannot be empty",
+    "fileRenamed": "Renamed document to \"{{name}}\"",
+    "deleteFile": "Delete Document",
+    "refreshExplorer": "Refresh Explorer",
+    "explorerFooterHint": "Right-click items to manage · Drag edge to resize",
+    "resizeSidebarAria": "Drag to resize explorer sidebar, double-click to reset",
+    "contextMenuAria": "Document explorer context menu"
   }
 }

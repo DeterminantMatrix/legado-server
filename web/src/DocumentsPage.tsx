@@ -3,6 +3,10 @@ import { useTranslation } from 'react-i18next'
 import { api, BookshelfItem, DocFolder } from './api'
 import {
   buildFolderTree,
+  clampContextMenuPosition,
+  clampSidebarWidth,
+  collectDescendantFolderIds,
+  DOC_SIDEBAR_DEFAULT_WIDTH,
   DOC_VIEW_ALL,
   DOC_VIEW_UNFILED,
   DocFolderNode,
@@ -22,6 +26,7 @@ import { toast } from './Toast'
 import { formatDavTime } from './WebDavSettingsPage'
 
 const DRAG_DOC_MIME = 'application/x-legado-doc'
+const SIDEBAR_WIDTH_STORAGE_KEY = 'legado-doc-sidebar-width-v1'
 
 type DragDocRef = { sourceId: string; bookUrl: string }
 
@@ -36,7 +41,21 @@ export type DocumentsPageProps = {
 type FolderModalState =
   | { type: 'create'; parentId: string | null; name: string }
   | { type: 'rename'; folder: DocFolder; name: string }
+  | { type: 'move-folder'; folder: DocFolder; targetParentId: string | null }
+  | { type: 'rename-file'; item: BookshelfItem; name: string }
   | { type: 'move'; items: DragDocRef[]; label: string; targetFolderId: string | null }
+
+type ContextMenuTarget =
+  | { kind: 'folder'; folder: DocFolder }
+  | { kind: 'file'; item: BookshelfItem }
+  | { kind: 'unfiled' }
+  | { kind: 'blank' }
+
+type ContextMenuState = {
+  x: number
+  y: number
+  target: ContextMenuTarget
+}
 
 export function DocumentsPage({ onOpen, initialItems, initialFolders }: DocumentsPageProps) {
   const { t } = useTranslation()
@@ -60,11 +79,33 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
   const [batchMode, setBatchMode] = useState(false)
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
   const [openMenuKey, setOpenMenuKey] = useState<string | null>(null)
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [mobileExplorerOpen, setMobileExplorerOpen] = useState(false)
   const [modal, setModal] = useState<FolderModalState | null>(null)
   const [modalBusy, setModalBusy] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return DOC_SIDEBAR_DEFAULT_WIDTH
+      const saved = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY)
+      return saved ? clampSidebarWidth(Number(saved)) : DOC_SIDEBAR_DEFAULT_WIDTH
+    } catch {
+      return DOC_SIDEBAR_DEFAULT_WIDTH
+    }
+  })
+  const [resizingSidebar, setResizingSidebar] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const pendingUploadFolderIdRef = useRef<string | null | undefined>(undefined)
   const explorerHydratedRef = useRef(false)
+
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth))
+      }
+    } catch {
+      // 忽略无痕模式或受限存储写失败
+    }
+  }, [sidebarWidth])
 
   const load = useCallback(async () => {
     try {
@@ -100,20 +141,27 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
     }
   }, [folders, selectedView])
 
-  // 点击页面空白处或按下 Esc 时关闭卡片更多菜单或弹窗
+  // 点击页面空白处或按下 Esc 时关闭卡片更多菜单或右键上下文菜单
   useEffect(() => {
-    if (!openMenuKey) return
-    const onDocClick = () => setOpenMenuKey(null)
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpenMenuKey(null)
+    if (!openMenuKey && !contextMenu) return
+    const closeMenus = () => {
+      setOpenMenuKey(null)
+      setContextMenu(null)
     }
-    window.addEventListener('click', onDocClick)
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMenus()
+    }
+    window.addEventListener('click', closeMenus)
+    window.addEventListener('resize', closeMenus)
+    window.addEventListener('scroll', closeMenus, true)
     window.addEventListener('keydown', onKeyDown)
     return () => {
-      window.removeEventListener('click', onDocClick)
+      window.removeEventListener('click', closeMenus)
+      window.removeEventListener('resize', closeMenus)
+      window.removeEventListener('scroll', closeMenus, true)
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [openMenuKey])
+  }, [openMenuKey, contextMenu])
 
   useEffect(() => {
     if (!modal) return
@@ -179,6 +227,12 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
 
   const folderSelectOptions = useMemo(() => flattenFoldersForSelect(folders), [folders])
 
+  const moveFolderOptions = useMemo(() => {
+    if (modal?.type !== 'move-folder') return []
+    const blockedIds = collectDescendantFolderIds(folders, modal.folder.id)
+    return folderSelectOptions.filter(opt => !blockedIds.has(opt.id))
+  }, [modal, folders, folderSelectOptions])
+
   const toggleExpandFolder = (folderId: string) => {
     setExpandedFolderIds(prev => {
       const next = new Set(prev)
@@ -214,6 +268,11 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
 
   const activeUploadFolderId =
     selectedView !== DOC_VIEW_ALL && selectedView !== DOC_VIEW_UNFILED ? selectedView : null
+
+  const triggerFileUpload = (targetFolderId?: string | null) => {
+    pendingUploadFolderIdRef.current = targetFolderId
+    fileInputRef.current?.click()
+  }
 
   const handleUploadFiles = async (files: FileList | File[] | null, targetFolderId: string | null = activeUploadFolderId) => {
     if (!files || files.length === 0) return
@@ -405,6 +464,53 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
       return
     }
 
+    if (modal.type === 'move-folder') {
+      setModalBusy(true)
+      try {
+        const updated = await api.updateDocFolder(modal.folder.id, {
+          parentId: modal.targetParentId,
+          updateParent: true,
+        })
+        setFolders(prev => prev.map(f => (f.id === updated.id ? updated : f)))
+        if (updated.parentId) expandFolderChain(updated.parentId)
+        toast.success(t('documents.folderMoved', { name: updated.name, defaultValue: `已移动文件夹「${updated.name}」` }))
+        setModal(null)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : t('documents.actionFailed', '操作失败'))
+      } finally {
+        setModalBusy(false)
+      }
+      return
+    }
+
+    if (modal.type === 'rename-file') {
+      const trimmed = modal.name.trim()
+      if (!trimmed) {
+        toast.warning(t('documents.fileNameEmpty', '文档名称不能为空'))
+        return
+      }
+      setModalBusy(true)
+      try {
+        // 显式透传 author 且不传 coverUrl / customVariable，确保作者与 variable（localFormat / docFolderId）完好保留
+        const updated = await api.updateBookshelfInfo({
+          sourceId: modal.item.sourceId,
+          bookUrl: modal.item.bookUrl,
+          name: trimmed,
+          author: modal.item.author,
+        })
+        setItems(prev => prev.map(it => (
+          it.sourceId === modal.item.sourceId && it.bookUrl === modal.item.bookUrl ? updated : it
+        )))
+        toast.success(t('documents.fileRenamed', { name: updated.name, defaultValue: `文档已重命名为「${updated.name}」` }))
+        setModal(null)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : t('documents.actionFailed', '操作失败'))
+      } finally {
+        setModalBusy(false)
+      }
+      return
+    }
+
     if (modal.type === 'move') {
       setModalBusy(true)
       try {
@@ -415,6 +521,55 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
         setModalBusy(false)
       }
     }
+  }
+
+  // 右键上下文菜单打开与定位
+  const openContextMenu = (x: number, y: number, target: ContextMenuTarget) => {
+    setOpenMenuKey(null)
+    setContextMenu({ x, y, target })
+  }
+
+  const handleElementContextMenu = (e: React.MouseEvent, target: ContextMenuTarget) => {
+    e.preventDefault()
+    e.stopPropagation()
+    openContextMenu(e.clientX, e.clientY, target)
+  }
+
+  const openContextMenuFromButton = (e: React.MouseEvent<HTMLButtonElement>, target: ContextMenuTarget) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const rect = e.currentTarget.getBoundingClientRect()
+    openContextMenu(rect.right, rect.bottom + 4, target)
+  }
+
+  // 侧栏右侧拖拽调宽
+  const startSidebarResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = sidebarWidth
+    setResizingSidebar(true)
+    const prevCursor = document.body.style.cursor
+    const prevSelect = document.body.style.userSelect
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const next = clampSidebarWidth(startWidth + (moveEvent.clientX - startX))
+      setSidebarWidth(next)
+    }
+    const onEnd = () => {
+      setResizingSidebar(false)
+      document.body.style.cursor = prevCursor
+      document.body.style.userSelect = prevSelect
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onEnd)
+      window.removeEventListener('pointercancel', onEnd)
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onEnd)
+    window.addEventListener('pointercancel', onEnd)
   }
 
   // 批量操作
@@ -508,11 +663,15 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
   const renderTreeFile = (item: BookshelfItem, depth: number) => {
     const fmt = getDocumentFormat(item) ?? 'md'
     const key = `${item.sourceId}\u0000${item.bookUrl}`
+    const isContextActive =
+      contextMenu?.target.kind === 'file' &&
+      contextMenu.target.item.sourceId === item.sourceId &&
+      contextMenu.target.item.bookUrl === item.bookUrl
     return (
       <div
         key={`tree-file-${key}`}
-        className="docs-tree-file"
-        style={{ paddingLeft: `${12 + depth * 16 + 18}px` }}
+        className={`docs-tree-file${isContextActive ? ' context-active' : ''}`}
+        style={{ paddingLeft: `${12 + depth * 14 + 18}px` }}
         role="button"
         tabIndex={0}
         draggable
@@ -521,14 +680,23 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
           e.dataTransfer.setData(DRAG_DOC_MIME, JSON.stringify([{ sourceId: item.sourceId, bookUrl: item.bookUrl }]))
         }}
         onClick={() => {
+          setContextMenu(null)
           setMobileExplorerOpen(false)
           onOpen(item)
         }}
+        onContextMenu={e => handleElementContextMenu(e, { kind: 'file', item })}
         onKeyDown={e => {
+          if (e.target !== e.currentTarget) return
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault()
             setMobileExplorerOpen(false)
             onOpen(item)
+          } else if (e.key === 'F2') {
+            e.preventDefault()
+            setModal({ type: 'rename-file', item, name: item.name })
+          } else if (e.key === 'Delete') {
+            e.preventDefault()
+            void handleDelete(item)
           }
         }}
         title={item.name}
@@ -536,6 +704,15 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
         <Icon name="file" className="docs-tree-file-icon" />
         <span className="docs-tree-label">{item.name}</span>
         <span className={`docs-tree-ext doc-badge-${fmt}`}>{fmt === 'docx' ? 'DOCX' : 'MD'}</span>
+        <button
+          type="button"
+          className="docs-tree-icon-btn docs-tree-more-btn"
+          title={t('documents.moreActions', '更多操作')}
+          aria-label={t('documents.moreActions', '更多操作')}
+          onClick={e => openContextMenuFromButton(e, { kind: 'file', item })}
+        >
+          <Icon name="more" />
+        </button>
       </div>
     )
   }
@@ -544,17 +721,34 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
     const isExpanded = expandedFolderIds.has(node.folder.id)
     const isActive = selectedView === node.folder.id
     const isDropOver = dragTargetView === node.folder.id
+    const isContextActive =
+      contextMenu?.target.kind === 'folder' && contextMenu.target.folder.id === node.folder.id
     const hasInner = node.children.length > 0 || node.directDocs.length > 0
 
     return (
       <div key={node.folder.id} className="docs-tree-branch">
         <div
-          className={`docs-tree-row${isActive ? ' active' : ''}${isDropOver ? ' drop-over' : ''}`}
-          style={{ paddingLeft: `${8 + depth * 16}px` }}
+          className={`docs-tree-row${isActive ? ' active' : ''}${isDropOver ? ' drop-over' : ''}${isContextActive ? ' context-active' : ''}`}
+          style={{ paddingLeft: `${8 + depth * 14}px` }}
           role="treeitem"
+          tabIndex={0}
           aria-expanded={isExpanded}
           aria-selected={isActive}
           onClick={() => selectView(node.folder.id)}
+          onContextMenu={e => handleElementContextMenu(e, { kind: 'folder', folder: node.folder })}
+          onKeyDown={e => {
+            if (e.target !== e.currentTarget) return
+            if (e.key === 'F2') {
+              e.preventDefault()
+              setModal({ type: 'rename', folder: node.folder, name: node.folder.name })
+            } else if (e.key === 'Delete') {
+              e.preventDefault()
+              void handleDeleteFolder(node.folder)
+            } else if (e.key === 'Enter') {
+              e.preventDefault()
+              selectView(node.folder.id)
+            }
+          }}
           onDragOver={e => handleTargetDragOver(e, node.folder.id)}
           onDragLeave={e => {
             if (!e.currentTarget.contains(e.relatedTarget as Node)) {
@@ -581,29 +775,11 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
             <button
               type="button"
               className="docs-tree-icon-btn"
-              title={t('documents.newSubfolder', '新建子文件夹')}
-              aria-label={t('documents.newSubfolder', '新建子文件夹')}
-              onClick={() => setModal({ type: 'create', parentId: node.folder.id, name: '' })}
+              title={t('documents.moreActions', '更多操作')}
+              aria-label={t('documents.moreActions', '更多操作')}
+              onClick={e => openContextMenuFromButton(e, { kind: 'folder', folder: node.folder })}
             >
-              <Icon name="plus" />
-            </button>
-            <button
-              type="button"
-              className="docs-tree-icon-btn"
-              title={t('documents.renameFolder', '重命名文件夹')}
-              aria-label={t('documents.renameFolder', '重命名文件夹')}
-              onClick={() => setModal({ type: 'rename', folder: node.folder, name: node.folder.name })}
-            >
-              <Icon name="edit" />
-            </button>
-            <button
-              type="button"
-              className="docs-tree-icon-btn danger"
-              title={t('documents.deleteFolder', '删除文件夹')}
-              aria-label={t('documents.deleteFolder', '删除文件夹')}
-              onClick={() => void handleDeleteFolder(node.folder)}
-            >
-              <Icon name="trash" />
+              <Icon name="more" />
             </button>
           </div>
         </div>
@@ -619,6 +795,326 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
 
   const allExpanded = folders.length > 0 && folders.every(f => expandedFolderIds.has(f.id))
   const unfiledExpanded = expandedFolderIds.has(DOC_VIEW_UNFILED)
+
+  // 计算右键菜单安全位置，避免贴靠屏幕边缘时被裁切
+  const contextMenuStyle = useMemo(() => {
+    if (!contextMenu) return undefined
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1280
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+    const estWidth = 232
+    const estHeight = contextMenu.target.kind === 'file'
+      ? 292
+      : contextMenu.target.kind === 'folder'
+        ? 282
+        : 204
+    const pos = clampContextMenuPosition(contextMenu.x, contextMenu.y, estWidth, estHeight, vw, vh)
+    return { left: `${pos.left}px`, top: `${pos.top}px` }
+  }, [contextMenu])
+
+  const renderContextMenu = () => {
+    if (!contextMenu) return null
+    const target = contextMenu.target
+    const itemFolderId = target.kind === 'file' ? getDocumentFolderId(target.item) : null
+
+    return (
+      <div
+        className="docs-context-menu"
+        style={contextMenuStyle}
+        role="menu"
+        aria-label={t('documents.contextMenuAria', '文档资源管理器右键菜单')}
+        onClick={e => e.stopPropagation()}
+        onContextMenu={e => e.preventDefault()}
+      >
+        {target.kind === 'folder' && (
+          <>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                selectView(target.folder.id)
+              }}
+            >
+              <Icon name="folderOpen" />
+              <span>{t('documents.openFolder', '打开文件夹')}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                setModal({ type: 'create', parentId: target.folder.id, name: '' })
+              }}
+            >
+              <Icon name="folderPlus" />
+              <span>{t('documents.newSubfolder', '新建子文件夹')}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                triggerFileUpload(target.folder.id)
+              }}
+            >
+              <Icon name="upload" />
+              <span>{t('documents.uploadToFolder', '上传文档到此文件夹')}</span>
+            </button>
+            <div className="docs-context-sep" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                setModal({ type: 'rename', folder: target.folder, name: target.folder.name })
+              }}
+            >
+              <Icon name="edit" />
+              <span>{t('documents.renameFolder', '重命名文件夹')}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                setModal({
+                  type: 'move-folder',
+                  folder: target.folder,
+                  targetParentId: target.folder.parentId ?? null,
+                })
+              }}
+            >
+              <Icon name="folder" />
+              <span>{t('documents.moveFolder', '移动文件夹到...')}</span>
+            </button>
+            <div className="docs-context-sep" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item danger"
+              onClick={() => {
+                setContextMenu(null)
+                void handleDeleteFolder(target.folder)
+              }}
+            >
+              <Icon name="trash" />
+              <span>{t('documents.deleteFolder', '删除文件夹')}</span>
+            </button>
+          </>
+        )}
+
+        {target.kind === 'file' && (
+          <>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                setMobileExplorerOpen(false)
+                onOpen(target.item)
+              }}
+            >
+              <Icon name="book" />
+              <span>{t('documents.openRead', '打开阅读')}</span>
+            </button>
+            <div className="docs-context-sep" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                setModal({ type: 'rename-file', item: target.item, name: target.item.name })
+              }}
+            >
+              <Icon name="edit" />
+              <span>{t('documents.renameFile', '重命名文档')}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                setModal({
+                  type: 'move',
+                  items: [{ sourceId: target.item.sourceId, bookUrl: target.item.bookUrl }],
+                  label: target.item.name,
+                  targetFolderId: itemFolderId,
+                })
+              }}
+            >
+              <Icon name="folder" />
+              <span>{t('documents.moveToFolder', '移动到文件夹')}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                void handleToggleCompleted(target.item)
+              }}
+            >
+              <Icon name="check" />
+              <span>{target.item.completed ? t('documents.markUnread', '标为未读') : t('documents.markRead', '标为已读')}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                void handleReparse(target.item)
+              }}
+            >
+              <Icon name="refresh" />
+              <span>{t('documents.reparseTitle', '按保留的源文件重新解析目录与排版')}</span>
+            </button>
+            <div className="docs-context-sep" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item danger"
+              onClick={() => {
+                setContextMenu(null)
+                void handleDelete(target.item)
+              }}
+            >
+              <Icon name="trash" />
+              <span>{t('documents.deleteFile', '删除文档')}</span>
+            </button>
+          </>
+        )}
+
+        {target.kind === 'unfiled' && (
+          <>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                selectView(DOC_VIEW_UNFILED)
+              }}
+            >
+              <Icon name="file" />
+              <span>{t('documents.unfiledDocs', '未归类')}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                setModal({ type: 'create', parentId: null, name: '' })
+              }}
+            >
+              <Icon name="folderPlus" />
+              <span>{t('documents.newFolder', '新建文件夹')}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                triggerFileUpload(null)
+              }}
+            >
+              <Icon name="upload" />
+              <span>{t('documents.uploadBtn', '上传 MD / DOCX')}</span>
+            </button>
+            <div className="docs-context-sep" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                toggleExpandFolder(DOC_VIEW_UNFILED)
+              }}
+            >
+              <Icon name={unfiledExpanded ? 'chevronDown' : 'chevronRight'} />
+              <span>{unfiledExpanded ? t('documents.collapseAll', '折叠全部') : t('documents.expandAll', '展开全部')}</span>
+            </button>
+          </>
+        )}
+
+        {target.kind === 'blank' && (
+          <>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                setModal({ type: 'create', parentId: null, name: '' })
+              }}
+            >
+              <Icon name="folderPlus" />
+              <span>{t('documents.newFolder', '新建文件夹')}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                triggerFileUpload(activeUploadFolderId)
+              }}
+            >
+              <Icon name="upload" />
+              <span>{t('documents.uploadBtn', '上传 MD / DOCX')}</span>
+            </button>
+            <div className="docs-context-sep" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                setExpandedFolderIds(new Set([...folders.map(f => f.id), DOC_VIEW_UNFILED]))
+              }}
+            >
+              <Icon name="chevronDown" />
+              <span>{t('documents.expandAll', '展开全部')}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                setExpandedFolderIds(new Set())
+              }}
+            >
+              <Icon name="chevronRight" />
+              <span>{t('documents.collapseAll', '折叠全部')}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="docs-context-item"
+              onClick={() => {
+                setContextMenu(null)
+                void load()
+              }}
+            >
+              <Icon name="refresh" />
+              <span>{t('documents.refreshExplorer', '刷新目录')}</span>
+            </button>
+          </>
+        )}
+      </div>
+    )
+  }
 
   return (
     <main
@@ -658,11 +1154,15 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
         />
       )}
 
-      <div className="docs-workspace">
-        {/* 最左侧竖向资源管理器 */}
+      <div
+        className="docs-workspace"
+        style={{ '--docs-sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
+      >
+        {/* 最左侧竖向资源管理器（桌面端拉满界面高度，支持右键菜单与边缘拖宽） */}
         <aside
-          className={`docs-sidebar${mobileExplorerOpen ? ' is-open' : ''}`}
+          className={`docs-sidebar${mobileExplorerOpen ? ' is-open' : ''}${resizingSidebar ? ' is-resizing' : ''}`}
           aria-label={t('documents.explorerTitle', '资源管理器')}
+          onContextMenu={e => handleElementContextMenu(e, { kind: 'blank' })}
         >
           <div className="docs-sidebar-header">
             <span className="docs-sidebar-title">{t('documents.explorerTitle', '资源管理器')}</span>
@@ -702,12 +1202,20 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
             </div>
           </div>
 
-          <nav className="docs-tree" role="tree" aria-label={t('documents.explorerTitle', '资源管理器')}>
+          <nav
+            className="docs-tree"
+            role="tree"
+            aria-label={t('documents.explorerTitle', '资源管理器')}
+            onContextMenu={e => {
+              if (e.target === e.currentTarget) handleElementContextMenu(e, { kind: 'blank' })
+            }}
+          >
             <div
               className={`docs-tree-row docs-tree-root${selectedView === DOC_VIEW_ALL ? ' active' : ''}`}
               role="treeitem"
               aria-selected={selectedView === DOC_VIEW_ALL}
               onClick={() => selectView(DOC_VIEW_ALL)}
+              onContextMenu={e => handleElementContextMenu(e, { kind: 'blank' })}
             >
               <Icon name="book" className="docs-tree-folder-icon" />
               <span className="docs-tree-label">{t('documents.allDocs', '全部文档')}</span>
@@ -716,11 +1224,12 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
 
             <div className="docs-tree-branch">
               <div
-                className={`docs-tree-row${selectedView === DOC_VIEW_UNFILED ? ' active' : ''}${dragTargetView === DOC_VIEW_UNFILED ? ' drop-over' : ''}`}
+                className={`docs-tree-row${selectedView === DOC_VIEW_UNFILED ? ' active' : ''}${dragTargetView === DOC_VIEW_UNFILED ? ' drop-over' : ''}${contextMenu?.target.kind === 'unfiled' ? ' context-active' : ''}`}
                 role="treeitem"
                 aria-expanded={unfiledExpanded}
                 aria-selected={selectedView === DOC_VIEW_UNFILED}
                 onClick={() => selectView(DOC_VIEW_UNFILED)}
+                onContextMenu={e => handleElementContextMenu(e, { kind: 'unfiled' })}
                 onDragOver={e => handleTargetDragOver(e, DOC_VIEW_UNFILED)}
                 onDragLeave={e => {
                   if (!e.currentTarget.contains(e.relatedTarget as Node)) {
@@ -753,6 +1262,19 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
 
             {treeData.roots.map(root => renderFolderBranch(root, 0))}
           </nav>
+
+          <footer className="docs-sidebar-footer">
+            <span>{t('documents.explorerFooterHint', '右键管理文件夹与文件 · 可拖右缘调宽')}</span>
+          </footer>
+
+          <div
+            className={`docs-sidebar-resizer${resizingSidebar ? ' is-resizing' : ''}`}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t('documents.resizeSidebarAria', '拖动调整资源管理器宽度，双击恢复默认')}
+            onPointerDown={startSidebarResize}
+            onDoubleClick={() => setSidebarWidth(DOC_SIDEBAR_DEFAULT_WIDTH)}
+          />
         </aside>
 
         {/* 右侧文档主界面（风格向书架对齐） */}
@@ -787,8 +1309,12 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                 accept={DOCUMENT_ACCEPT_ATTR}
                 style={{ display: 'none' }}
                 onChange={e => {
+                  const targetId = pendingUploadFolderIdRef.current !== undefined
+                    ? pendingUploadFolderIdRef.current
+                    : activeUploadFolderId
+                  pendingUploadFolderIdRef.current = undefined
                   if (e.target.files && e.target.files.length > 0) {
-                    void handleUploadFiles(e.target.files, activeUploadFolderId)
+                    void handleUploadFiles(e.target.files, targetId)
                     e.target.value = ''
                   }
                 }}
@@ -797,7 +1323,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                 type="button"
                 className="shelf-import-btn"
                 disabled={uploading}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => triggerFileUpload(activeUploadFolderId)}
               >
                 <Icon name="upload" />
                 <span>{uploading ? t('common.loading', '导入中...') : t('documents.uploadBtn', '上传 MD / DOCX')}</span>
@@ -884,6 +1410,8 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                 </button>
               </div>
 
+              <span className="docs-filter-divider" aria-hidden="true" />
+
               <div className="shelf-status-pills">
                 <button
                   type="button"
@@ -933,7 +1461,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
 
           {message && <p className="form-error">{message}</p>}
 
-          {/* 当前文件夹下包含子文件夹时展示直接子目录快捷条 */}
+          {/* 当前文件夹下包含子文件夹时展示直接子目录快捷入口（同样支持右键） */}
           {currentSubfolders.length > 0 && (
             <section className="docs-subfolders" aria-label={t('documents.subfoldersLabel', '子文件夹')}>
               {currentSubfolders.map(sub => {
@@ -944,6 +1472,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                     type="button"
                     className={`docs-subfolder-chip${isDropOver ? ' drop-over' : ''}`}
                     onClick={() => selectView(sub.folder.id)}
+                    onContextMenu={e => handleElementContextMenu(e, { kind: 'folder', folder: sub.folder })}
                     onDragOver={e => handleTargetDragOver(e, sub.folder.id)}
                     onDragLeave={e => {
                       if (!e.currentTarget.contains(e.relatedTarget as Node)) {
@@ -976,7 +1505,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                 className="shelf-import-btn"
                 style={{ marginTop: '12px' }}
                 disabled={uploading}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => triggerFileUpload(activeUploadFolderId)}
               >
                 <Icon name="upload" />
                 <span>{t('documents.uploadBtn', '上传 MD / DOCX')}</span>
@@ -1000,7 +1529,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                 className="shelf-import-btn"
                 style={{ marginTop: '12px' }}
                 disabled={uploading}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => triggerFileUpload(activeUploadFolderId)}
               >
                 <Icon name="upload" />
                 <span>{t('documents.uploadBtn', '上传 MD / DOCX')}</span>
@@ -1044,6 +1573,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                       e.dataTransfer.setData(DRAG_DOC_MIME, JSON.stringify([{ sourceId: item.sourceId, bookUrl: item.bookUrl }]))
                     }}
                     onClick={batchMode ? () => toggleSelectKey(key) : undefined}
+                    onContextMenu={batchMode ? undefined : e => handleElementContextMenu(e, { kind: 'file', item })}
                   >
                     {/* 无封面紧凑顶部行：文件图标 + 所属文件夹徽签 + MD/DOCX 角标 */}
                     <div className="doc-card-head">
@@ -1120,12 +1650,26 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                             aria-label={t('documents.moreActions', '更多操作')}
                             title={t('documents.moreActions', '更多操作')}
                             aria-expanded={menuOpen}
-                            onClick={() => setOpenMenuKey(menuOpen ? null : key)}
+                            onClick={() => {
+                              setContextMenu(null)
+                              setOpenMenuKey(menuOpen ? null : key)
+                            }}
                           >
                             <Icon name="more" />
                           </button>
                           {menuOpen && (
                             <div className="doc-more-menu" role="menu">
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setOpenMenuKey(null)
+                                  setModal({ type: 'rename-file', item, name: item.name })
+                                }}
+                              >
+                                <Icon name="edit" />
+                                <span>{t('documents.renameFile', '重命名文档')}</span>
+                              </button>
                               <button
                                 type="button"
                                 role="menuitem"
@@ -1162,7 +1706,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                                 }}
                               >
                                 <Icon name="refresh" />
-                                <span>{t('documents.reparseTitle', '重新解析排版')}</span>
+                                <span>{t('documents.reparseTitle', '按保留的源文件重新解析目录与排版')}</span>
                               </button>
                               <button
                                 type="button"
@@ -1188,6 +1732,9 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
           )}
         </div>
       </div>
+
+      {/* Windows 风格全局右键菜单 */}
+      {renderContextMenu()}
 
       {/* 批量管理底栏（复用书架浮条样式） */}
       {batchMode && selectedRefs.length > 0 && (
@@ -1252,7 +1799,7 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
         </aside>
       )}
 
-      {/* 文件夹创建 / 重命名 / 移动文档弹窗 */}
+      {/* 文件夹创建 / 重命名 / 移动文件夹 / 重命名文件 / 移动文档弹窗 */}
       {modal && (
         <div
           className="modal-backdrop"
@@ -1272,7 +1819,11 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                     ? (modal.parentId ? t('documents.newSubfolder', '新建子文件夹') : t('documents.newFolder', '新建文件夹'))
                     : modal.type === 'rename'
                       ? t('documents.renameFolder', '重命名文件夹')
-                      : t('documents.moveToFolder', '移动到文件夹')}
+                      : modal.type === 'move-folder'
+                        ? t('documents.moveFolder', '移动文件夹到...')
+                        : modal.type === 'rename-file'
+                          ? t('documents.renameFile', '重命名文档')
+                          : t('documents.moveToFolder', '移动到文件夹')}
                 </h2>
                 {modal.type === 'create' && modal.parentId && (
                   <small>
@@ -1283,6 +1834,8 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                   </small>
                 )}
                 {modal.type === 'move' && <small>{modal.label}</small>}
+                {modal.type === 'move-folder' && <small>{modal.folder.name}</small>}
+                {modal.type === 'rename-file' && <small>{modal.item.name}</small>}
               </div>
               <button
                 type="button"
@@ -1324,6 +1877,44 @@ export function DocumentsPage({ onOpen, initialItems, initialFolders }: Document
                     </button>
                   ))}
                 </div>
+              ) : modal.type === 'move-folder' ? (
+                <div className="docs-move-list">
+                  <button
+                    type="button"
+                    className={`docs-move-option${modal.targetParentId === null ? ' selected' : ''}`}
+                    onClick={() => setModal({ ...modal, targetParentId: null })}
+                  >
+                    <Icon name="book" />
+                    <div className="docs-move-option-text">
+                      <strong>{t('documents.topLevelFolder', '顶层目录（根目录）')}</strong>
+                      <small>{t('documents.topLevelFolderHint', '作为顶层文件夹显示在资源管理器根目录')}</small>
+                    </div>
+                    {modal.targetParentId === null && <Icon name="check" className="docs-move-check" />}
+                  </button>
+                  {moveFolderOptions.map(opt => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      className={`docs-move-option${modal.targetParentId === opt.id ? ' selected' : ''}`}
+                      style={{ paddingLeft: `${12 + opt.depth * 18}px` }}
+                      onClick={() => setModal({ ...modal, targetParentId: opt.id })}
+                    >
+                      <Icon name="folder" />
+                      <span className="docs-move-option-name">{opt.name}</span>
+                      {modal.targetParentId === opt.id && <Icon name="check" className="docs-move-check" />}
+                    </button>
+                  ))}
+                </div>
+              ) : modal.type === 'rename-file' ? (
+                <input
+                  type="text"
+                  autoFocus
+                  maxLength={120}
+                  className="docs-modal-input"
+                  value={modal.name}
+                  placeholder={t('documents.fileNamePlaceholder', '输入新的文档名称')}
+                  onChange={e => setModal({ ...modal, name: e.target.value })}
+                />
               ) : (
                 <input
                   type="text"

@@ -7,6 +7,10 @@ import { defaultReaderSettings } from '../src/readerSettings'
 import type { BookshelfItem, DocFolder } from '../src/api'
 import {
   buildFolderTree,
+  clampContextMenuPosition,
+  clampSidebarWidth,
+  collectDescendantFolderIds,
+  DOC_SIDEBAR_DEFAULT_WIDTH,
   DOC_VIEW_ALL,
   DOC_VIEW_UNFILED,
   DOCUMENT_ACCEPT_ATTR,
@@ -246,4 +250,21 @@ test('Documents - folder tree building, breadcrumbs, selection filtering and cyc
   assert.ok(treeHtml.includes('1972-1978'))
   assert.ok(treeHtml.includes('docs-tree-file'), '展开的文件夹下应列出可直接点击打开的文档文件')
   assert.ok(treeHtml.includes('doc-folder-pill'), '已归类文档卡片应展示所属文件夹标签')
+  assert.ok(treeHtml.includes('docs-sidebar-resizer'), '应渲染侧栏右缘拖宽手柄')
+  assert.ok(treeHtml.includes('docs-sidebar-footer'), '应渲染资源管理器底栏提示')
+  assert.ok(treeHtml.includes('docs-tree-more-btn'), '树内文件节点应含触屏/点击可用的更多菜单入口')
+
+  // 后代收集、右键菜单视口边界夹紧与侧栏宽度边界校验
+  const rootDesc = collectDescendantFolderIds(folders, 'f-root')
+  assert.deepEqual([...rootDesc].sort(), ['f-leaf', 'f-root', 'f-sub'])
+  assert.equal(collectDescendantFolderIds(cyclic, 'a').size, 2)
+
+  assert.deepEqual(clampContextMenuPosition(120, 140, 220, 260, 1280, 800), { left: 120, top: 140 })
+  assert.deepEqual(clampContextMenuPosition(1220, 740, 220, 260, 1280, 800), { left: 1000, top: 480 })
+  assert.deepEqual(clampContextMenuPosition(-10, -20, 220, 260, 160, 140), { left: 8, top: 8 })
+
+  assert.equal(clampSidebarWidth(120), 200)
+  assert.equal(clampSidebarWidth(600), 480)
+  assert.equal(clampSidebarWidth(310.4), 310)
+  assert.equal(clampSidebarWidth(Number.NaN), DOC_SIDEBAR_DEFAULT_WIDTH)
 })
