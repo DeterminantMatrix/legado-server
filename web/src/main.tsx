@@ -9,7 +9,18 @@ import { Login } from './Login'
 import { OpenBook, ReaderScreen } from './ReaderScreen'
 import { MangaReaderScreen } from './MangaReaderScreen'
 import { AudiobookPlayerScreen } from './AudiobookPlayerScreen'
-import { loadReaderSettings, ReaderSettings, ReaderTheme, saveReaderSettings } from './readerSettings'
+import {
+  extractTypographySettings,
+  loadDocumentTypographySettings,
+  loadReaderSettings,
+  mergeDocumentSettings,
+  mergeSharedReaderSettings,
+  ReaderSettings,
+  ReaderTheme,
+  ReaderTypographySettings,
+  saveDocumentTypographySettings,
+  saveReaderSettings,
+} from './readerSettings'
 import { AppHeader } from './AppHeader'
 import { cleanAuthor, cleanTitle, defaultSearchFilters, filterSearchGroups, isExactMatch, isPopularMatch, SearchFilters, SearchGroup, SortMode } from './searchFilters'
 import { groupSearchResults, searchStore, SourceChoice, SourceChoiceStatus, useSearchStore } from './searchStore'
@@ -3346,6 +3357,7 @@ function App() {
   const [ready, setReady] = useState(false)
   const [authenticated, setAuthenticated] = useState(false)
   const [settings, setSettings] = useState<ReaderSettings>(loadReaderSettings)
+  const [docTypography, setDocTypography] = useState<ReaderTypographySettings>(loadDocumentTypographySettings)
   const [page, setPage] = useState<Page>(pageFromHash)
   const [readerReturnPage, setReaderReturnPage] = useState<Page>('shelf')
   const [sources, setSources] = useState<SourceSummary[]>([])
@@ -3375,6 +3387,55 @@ function App() {
       document.body.classList.add(`theme-${settings.theme}`)
     }
   }, [settings])
+
+  useEffect(() => {
+    saveDocumentTypographySettings(docTypography)
+  }, [docTypography])
+
+  useEffect(() => {
+    // 兼容升级前遗留在 sessionStorage 的本地文档会话：缺省 isDocument 时自动向书架校准一次。
+    if (!authenticated || page !== 'reader' || !reader) return
+    if (
+      reader.book.isDocument !== undefined ||
+      !isLocalBook({ sourceId: reader.book.details.sourceId, bookUrl: reader.book.bookUrl })
+    ) return
+    let cancelled = false
+    void api.bookshelf().then(list => {
+      if (cancelled) return
+      const matched = list.find(entry => entry.bookUrl === reader.book.bookUrl)
+      const isDoc = matched ? isDocumentItem(matched) : false
+      setReader(prev => {
+        if (!prev || prev.book.bookUrl !== reader.book.bookUrl || prev.book.isDocument !== undefined) return prev
+        const nextBook: OpenBook = { ...prev.book, isDocument: isDoc }
+        try {
+          sessionStorage.setItem(readerStorageKey, JSON.stringify({ book: nextBook, index: prev.index }))
+        } catch {
+          // 忽略 storage 写入受限错误
+        }
+        return { ...prev, book: nextBook }
+      })
+    }).catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [authenticated, page, reader])
+
+  const isDocReader = Boolean(reader?.book.isDocument)
+  const activeReaderSettings = useMemo(
+    () => (isDocReader ? mergeDocumentSettings(settings, docTypography) : settings),
+    [isDocReader, settings, docTypography],
+  )
+  const handleReaderSettingsChange = useCallback(
+    (next: ReaderSettings) => {
+      if (isDocReader) {
+        setDocTypography(extractTypographySettings(next))
+        setSettings(prev => mergeSharedReaderSettings(prev, next))
+        return
+      }
+      setSettings(next)
+    },
+    [isDocReader],
+  )
 
   /**
    * 「关闭网页时自动备份」的触发点。
@@ -3512,6 +3573,7 @@ function App() {
         bookUrl: item.bookUrl,
         chapters,
         bookKind: item.bookKind,
+        isDocument: isDocumentItem(item),
         progress: mergedProgress || (item.chapterIndex !== undefined ? {
           sourceId: item.sourceId,
           bookUrl: item.bookUrl,
@@ -3540,6 +3602,7 @@ function App() {
           updatedAt: item.lastReadAt,
         },
         bookKind: item.bookKind,
+        isDocument: isDocumentItem(item),
       }, resumeIdx, returnPage)
       // 兜底目录只有当前这一章（index = resumeIdx），书签落点无处可落 ⇒ 不传 bookmark，
       // 但必须把 resumeIdx 传回去：ReaderScreen 靠 `chapter.index === startIndex` 恢复进度，
@@ -3641,8 +3704,9 @@ function App() {
           openBook={reader.book}
           startIndex={reader.index}
           startBookmark={reader.bookmark}
-          settings={settings}
-          onSettingsChange={setSettings}
+          settings={activeReaderSettings}
+          onSettingsChange={handleReaderSettingsChange}
+          isDocumentMode={isDocReader}
           onClose={closeReader}
         />
       </div>

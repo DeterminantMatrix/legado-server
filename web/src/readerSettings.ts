@@ -29,7 +29,24 @@ export type ReaderSettings = {
   ttsCustomMethod?: string
 }
 
+/** 文档与小说各自独立持久化的排版与布局字段集合（不包含全站主题与 TTS 听书设置）。 */
+export type ReaderTypographySettings = Pick<
+  ReaderSettings,
+  | 'fontSize'
+  | 'lineHeight'
+  | 'letterSpacing'
+  | 'paragraphSpacing'
+  | 'contentPadding'
+  | 'font'
+  | 'pageMode'
+  | 'maxWidth'
+  | 'columnMode'
+  | 'sidebarPinned'
+>
+
 const storageKey = 'legado-reader-settings-v2'
+export const documentTypographyStorageKey = 'legado-doc-reader-settings-v1'
+
 export const defaultReaderSettings: ReaderSettings = {
   theme: 'light',
   fontSize: 19,
@@ -54,6 +71,23 @@ export const defaultReaderSettings: ReaderSettings = {
   ttsCustomMethod: 'GET',
 }
 
+/**
+ * Markdown / Word 文档专属开箱默认排版：
+ * 贴合 Obsidian Everforest Clarity 中英混排长文习惯，并与书架小说默认设置完全隔离。
+ */
+export const defaultDocumentTypographySettings: ReaderTypographySettings = {
+  fontSize: 17,
+  lineHeight: 1.75,
+  letterSpacing: 0,
+  paragraphSpacing: 0.95,
+  contentPadding: 60,
+  font: 'system',
+  pageMode: 'scroll',
+  maxWidth: 860,
+  columnMode: 'single',
+  sidebarPinned: false,
+}
+
 export function clampScrollPosition(value: number): number {
   return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0
 }
@@ -62,25 +96,53 @@ export function scrollPosition(scrollTop: number, scrollHeight: number, clientHe
   return clampScrollPosition(scrollTop / Math.max(1, scrollHeight - clientHeight))
 }
 
-export function parseReaderFont(font: unknown): ReaderFont {
-  if (font === 'hei' || font === 'kai' || font === 'fangsong' || font === 'system') return font
-  return 'song'
+export function parseReaderFont(font: unknown, fallback: ReaderFont = 'song'): ReaderFont {
+  if (font === 'song' || font === 'hei' || font === 'kai' || font === 'fangsong' || font === 'system') return font
+  return fallback
 }
 
-export function parsePageMode(mode: unknown): ReaderPageMode {
-  return mode === 'paginate' ? 'paginate' : 'scroll'
+export function parsePageMode(mode: unknown, fallback: ReaderPageMode = 'scroll'): ReaderPageMode {
+  if (mode === 'scroll' || mode === 'paginate') return mode
+  return fallback
 }
 
-export function parseColumnMode(mode: unknown): ReaderColumnMode {
+export function parseColumnMode(mode: unknown, fallback: ReaderColumnMode = 'auto'): ReaderColumnMode {
   if (mode === 'single' || mode === 'double' || mode === 'auto') return mode
-  return 'auto'
+  return fallback
 }
 
-export function parseMaxWidth(width: unknown): number {
+export function parseMaxWidth(width: unknown, fallback: number = defaultReaderSettings.maxWidth): number {
   if (typeof width === 'number' && Number.isFinite(width)) {
     return Math.min(1400, Math.max(560, Math.round(width)))
   }
-  return defaultReaderSettings.maxWidth
+  return fallback
+}
+
+function clampFinite(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.min(max, Math.max(min, value))
+  }
+  return fallback
+}
+
+/** 对排版与布局字段进行统一夹紧及回退归一化，供小说与文档配置共用。 */
+function normalizeTypographySettings(
+  raw: Partial<Record<keyof ReaderTypographySettings, unknown>> | null | undefined,
+  fallback: ReaderTypographySettings,
+): ReaderTypographySettings {
+  const saved = raw ?? {}
+  return {
+    fontSize: clampFinite(saved.fontSize, 15, 28, fallback.fontSize),
+    lineHeight: clampFinite(saved.lineHeight, 1.45, 2.4, fallback.lineHeight),
+    letterSpacing: clampFinite(saved.letterSpacing, -0.25, 1.5, fallback.letterSpacing),
+    paragraphSpacing: clampFinite(saved.paragraphSpacing, 0.7, 2, fallback.paragraphSpacing),
+    contentPadding: clampFinite(saved.contentPadding, 20, 120, fallback.contentPadding),
+    font: parseReaderFont(saved.font, fallback.font),
+    pageMode: parsePageMode(saved.pageMode, fallback.pageMode),
+    maxWidth: parseMaxWidth(saved.maxWidth, fallback.maxWidth),
+    columnMode: parseColumnMode(saved.columnMode, fallback.columnMode),
+    sidebarPinned: typeof saved.sidebarPinned === 'boolean' ? saved.sidebarPinned : fallback.sidebarPinned,
+  }
 }
 
 export function parseTtsEngine(engine: unknown): TtsEngineType {
@@ -118,16 +180,7 @@ export function loadReaderSettings(): ReaderSettings {
       : (typeof saved.ttsVoice === 'string' && saved.ttsVoice.trim() ? saved.ttsVoice : defaultReaderSettings.ttsVoice)
     return {
       theme: saved.theme === 'paper' || saved.theme === 'dark' ? saved.theme : defaultReaderSettings.theme,
-      fontSize: typeof saved.fontSize === 'number' ? Math.min(28, Math.max(15, saved.fontSize)) : defaultReaderSettings.fontSize,
-      lineHeight: typeof saved.lineHeight === 'number' ? Math.min(2.4, Math.max(1.45, saved.lineHeight)) : defaultReaderSettings.lineHeight,
-      letterSpacing: typeof saved.letterSpacing === 'number' ? Math.min(1.5, Math.max(-.25, saved.letterSpacing)) : defaultReaderSettings.letterSpacing,
-      paragraphSpacing: typeof saved.paragraphSpacing === 'number' ? Math.min(2, Math.max(.7, saved.paragraphSpacing)) : defaultReaderSettings.paragraphSpacing,
-      contentPadding: typeof saved.contentPadding === 'number' ? Math.min(120, Math.max(20, saved.contentPadding)) : defaultReaderSettings.contentPadding,
-      font: parseReaderFont(saved.font),
-      pageMode: parsePageMode(saved.pageMode),
-      maxWidth: parseMaxWidth(saved.maxWidth),
-      columnMode: parseColumnMode(saved.columnMode),
-      sidebarPinned: typeof saved.sidebarPinned === 'boolean' ? saved.sidebarPinned : defaultReaderSettings.sidebarPinned,
+      ...normalizeTypographySettings(saved, defaultReaderSettings),
       ttsEngine,
       ttsVoice,
       ttsSpeed: typeof saved.ttsSpeed === 'number' && Number.isFinite(saved.ttsSpeed) ? Math.min(3.0, Math.max(0.5, saved.ttsSpeed)) : defaultReaderSettings.ttsSpeed,
@@ -142,6 +195,67 @@ export function loadReaderSettings(): ReaderSettings {
     }
   } catch {
     return defaultReaderSettings
+  }
+}
+
+/** 仅提取 10 个排版与布局字段，避免将全站主题或 TTS 配置混入文档排版存储键。 */
+export function extractTypographySettings(settings: ReaderTypographySettings): ReaderTypographySettings {
+  return {
+    fontSize: settings.fontSize,
+    lineHeight: settings.lineHeight,
+    letterSpacing: settings.letterSpacing,
+    paragraphSpacing: settings.paragraphSpacing,
+    contentPadding: settings.contentPadding,
+    font: settings.font,
+    pageMode: settings.pageMode,
+    maxWidth: settings.maxWidth,
+    columnMode: settings.columnMode,
+    sidebarPinned: settings.sidebarPinned,
+  }
+}
+
+/** 从独立的 `legado-doc-reader-settings-v1` 加载文档阅读排版设置。 */
+export function loadDocumentTypographySettings(): ReaderTypographySettings {
+  try {
+    const raw = window.localStorage.getItem(documentTypographyStorageKey)
+    if (!raw) return { ...defaultDocumentTypographySettings }
+    const saved = JSON.parse(raw) as Partial<Record<keyof ReaderTypographySettings, unknown>>
+    return normalizeTypographySettings(saved, defaultDocumentTypographySettings)
+  } catch {
+    return { ...defaultDocumentTypographySettings }
+  }
+}
+
+/** 将文档排版设置独立持久化到 `legado-doc-reader-settings-v1`。 */
+export function saveDocumentTypographySettings(settings: ReaderTypographySettings): void {
+  window.localStorage.setItem(
+    documentTypographyStorageKey,
+    JSON.stringify(extractTypographySettings(settings)),
+  )
+}
+
+/** 合成文档阅读器生效配置：保留全站主题与 TTS，替换成文档专属排版字段。 */
+export function mergeDocumentSettings(
+  base: ReaderSettings,
+  docTypography: ReaderTypographySettings,
+): ReaderSettings {
+  return {
+    ...base,
+    ...extractTypographySettings(docTypography),
+  }
+}
+
+/**
+ * 将文档模式下修改的共享字段（全站主题、TTS 设置）回写到全局设置，
+ * 同时 100% 保留 `base` 原有的书架小说排版字段不受污染。
+ */
+export function mergeSharedReaderSettings(
+  base: ReaderSettings,
+  updated: ReaderSettings,
+): ReaderSettings {
+  return {
+    ...updated,
+    ...extractTypographySettings(base),
   }
 }
 

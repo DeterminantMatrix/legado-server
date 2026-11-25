@@ -545,6 +545,8 @@
     "replaceRulesManage": "替換淨化規則管理",
     "replaceRulesHint": "針對當前書籍/書源過濾廣告與特定字元",
     "restoreDefaults": "恢復預設設定",
+    "docSettingsNotice": "文件獨立排版 · 調整字號、字體、間距與翻頁方式不會影響書架小說",
+    "restoreDocDefaults": "恢復文件預設排版",
     "fetchingContent": "正在從書源讀取正文...",
     "toc": "目錄",
     "tocDrawer": "目錄抽屜",

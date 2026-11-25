@@ -7915,4 +7915,14 @@ mark.search-highlight { background: var(--accent-soft); color: var(--accent); fo
   }
 }
 
+.reader-doc-settings-notice {
+  padding: 8px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 

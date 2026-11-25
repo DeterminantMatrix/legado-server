@@ -545,6 +545,8 @@
     "replaceRulesManage": "置換ルールの管理",
     "replaceRulesHint": "現在の書籍や書源に対する広告や特定文字をフィルタ",
     "restoreDefaults": "初期設定に戻す",
+    "docSettingsNotice": "ドキュメント専用組版 · 文字サイズ・フォント・余白の変更は本棚の小説に影響しません",
+    "restoreDocDefaults": "ドキュメント組版を初期値に戻す",
     "fetchingContent": "書源から本文を取得中...",
     "toc": "目次",
     "tocDrawer": "目次ドロワー",

@@ -545,6 +545,8 @@
     "replaceRulesManage": "Replace Rules Manager",
     "replaceRulesHint": "Filter ads and noise for current book or source",
     "restoreDefaults": "Restore Defaults",
+    "docSettingsNotice": "Document typography profile · Font, spacing, and layout changes will not affect bookshelf novels",
+    "restoreDocDefaults": "Reset document typography",
     "fetchingContent": "Fetching content from source...",
     "toc": "Contents",
     "tocDrawer": "TOC Drawer",

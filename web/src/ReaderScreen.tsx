@@ -23,7 +23,7 @@ import {
   scrollSectionKey,
 } from './readerScrollStream'
 import type { ScrollStreamSlot } from './readerScrollStream'
-import { clampScrollPosition, defaultReaderSettings, getReaderFontFamily, ReaderSettings, scrollPosition, TtsEngineType } from './readerSettings'
+import { clampScrollPosition, defaultDocumentTypographySettings, defaultReaderSettings, getReaderFontFamily, ReaderSettings, scrollPosition, TtsEngineType } from './readerSettings'
 import { SourceSwitchModal, switchBookSource } from './sourceSwitch'
 import { toast } from './Toast'
 import { processChapterForTts, TtsChapterData } from './ttsTextProcessor'
@@ -44,7 +44,7 @@ import { IllustrationLightbox, InlineIllustration } from './ReaderIllustration'
 import { isLocalBook } from './localBook'
 import { isMarkdownBlock, MarkdownBlock } from './markdownReader'
 
-export type OpenBook = { details: BookDetails; bookUrl: string; chapters: Chapter[]; progress?: ReadingProgress; bookKind?: string }
+export type OpenBook = { details: BookDetails; bookUrl: string; chapters: Chapter[]; progress?: ReadingProgress; bookKind?: string; isDocument?: boolean }
 
 /**
  * 滚动排障用的渲染采样开关（localStorage: `legado-scroll-debug` = '1'）。
@@ -67,6 +67,8 @@ type ReaderScreenProps = {
   settings: ReaderSettings
   onSettingsChange: (next: ReaderSettings) => void
   onClose: () => void
+  /** 是否处于 Markdown / Word 文档独立排版模式。 */
+  isDocumentMode?: boolean
   /**
    * 从「书签」页点进来时要跳到的位置（章内字符偏移）。
    *
@@ -88,10 +90,12 @@ function ReaderSettingsControls({
   settings,
   onChange,
   onOpenReplaceRules,
+  isDocumentMode = false,
 }: {
   settings: ReaderSettings
   onChange: (next: ReaderSettings) => void
   onOpenReplaceRules?: () => void
+  isDocumentMode?: boolean
 }) {
   const { t } = useTranslation()
   const themes = [
@@ -101,6 +105,11 @@ function ReaderSettingsControls({
   ] as const
   const update = (value: Partial<ReaderSettings>) => onChange({ ...settings, ...value })
   return <div className="drawer-scroll-content">
+    {isDocumentMode ? (
+      <div className="reader-doc-settings-notice" role="status">
+        {t('reader.docSettingsNotice', '文档独立排版 · 调整字号、字体、间距与翻页方式不会影响书架小说')}
+      </div>
+    ) : null}
     <section className="setting-section"><span className="setting-label">{t('reader.themeSection', '主题')}</span><div className="theme-grid">{themes.map(([theme, label]) => <button key={theme} className={`theme-choice theme-${theme} ${settings.theme === theme ? 'selected' : ''}`} onClick={() => update({ theme })}><i>{settings.theme === theme && <Icon name="check" />}</i><small>{label}</small></button>)}</div></section>
     <section className="setting-section"><span className="setting-label">{t('reader.fontSection', '字体')}</span><label className="font-select"><select value={settings.font} onChange={event => update({ font: event.target.value as ReaderSettings['font'] })}><option value="song">{t('reader.fontSong', '思源宋体')}</option><option value="hei">{t('reader.fontHei', '黑体 / 苹方')}</option><option value="kai">{t('reader.fontKai', '华文楷体')}</option><option value="fangsong">{t('reader.fontFangsong', '华文仿宋')}</option><option value="system">{t('reader.fontSystem', '系统字体')}</option></select><Icon name="chevronDown" /></label></section>
     <section className="setting-section compact-settings">
@@ -158,7 +167,20 @@ function ReaderSettingsControls({
         <small className="setting-hint">{t('reader.replaceRulesHint', '针对当前书籍/书源过滤广告与特定字符')}</small>
       </section>
     )}
-    <button className="reset-settings" onClick={() => onChange({ ...defaultReaderSettings, theme: settings.theme })}>{t('reader.restoreDefaults', '恢复默认设置')}</button>
+    <button
+      className="reset-settings"
+      onClick={() =>
+        onChange(
+          isDocumentMode
+            ? { ...settings, ...defaultDocumentTypographySettings }
+            : { ...defaultReaderSettings, theme: settings.theme },
+        )
+      }
+    >
+      {isDocumentMode
+        ? t('reader.restoreDocDefaults', '恢复文档默认排版')
+        : t('reader.restoreDefaults', '恢复默认设置')}
+    </button>
   </div>
 }
 
@@ -303,7 +325,7 @@ export function VirtualChapterList({
   )
 }
 
-export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange, onClose, startBookmark }: ReaderScreenProps) {
+export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange, onClose, startBookmark, isDocumentMode }: ReaderScreenProps) {
   const { t } = useTranslation()
   const [currentBook, setCurrentBook] = useState<OpenBook>(openBook)
   const [chapterIndex, setChapterIndex] = useState(startIndex)
@@ -2803,6 +2825,7 @@ export function ReaderScreen({ openBook, startIndex, settings, onSettingsChange,
         settings={settings}
         onChange={onSettingsChange}
         onOpenReplaceRules={() => setShowReplaceRules(true)}
+        isDocumentMode={isDocumentMode}
       />
     </aside>
 

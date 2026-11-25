@@ -545,6 +545,8 @@
     "replaceRulesManage": "替换净化规则管理",
     "replaceRulesHint": "针对当前书籍/书源过滤广告与特定字符",
     "restoreDefaults": "恢复默认设置",
+    "docSettingsNotice": "文档独立排版 · 调整字号、字体、间距与翻页方式不会影响书架小说",
+    "restoreDocDefaults": "恢复文档默认排版",
     "fetchingContent": "正在从书源拉取正文...",
     "toc": "目录",
     "tocDrawer": "目录抽屉",
