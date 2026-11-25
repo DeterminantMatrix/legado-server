@@ -4751,13 +4751,19 @@ class Database internal constructor(private val spec: DatabaseSpec) : Closeable,
                 }
             }
         }
-        if (cleanBase.lowercase() !in existingNames) return@connect cleanBase
-        var index = 1
-        while (true) {
-            val candidate = if (index == 1) "$cleanBase - 副本" else "$cleanBase - 副本 $index"
-            if (candidate.lowercase() !in existingNames) return@connect candidate
-            index++
+        var resolved = cleanBase
+        if (resolved.lowercase() in existingNames) {
+            var index = 1
+            while (true) {
+                val candidate = if (index == 1) "$cleanBase - 副本" else "$cleanBase - 副本 $index"
+                if (candidate.lowercase() !in existingNames) {
+                    resolved = candidate
+                    break
+                }
+                index++
+            }
         }
+        resolved
     }
 
     private fun pickUniqueFolderName(baseName: String, existingLower: Set<String>): String {
