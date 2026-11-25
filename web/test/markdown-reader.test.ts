@@ -137,3 +137,19 @@ test('MarkdownReader - TTS strips markdown markers and keeps paragraph indices a
   assert.equal(tts.paragraphs[2].sentences.length, 0)
   assert.equal(tts.chunks.some(c => c.paragraphIndex === 3 && c.text.includes('延迟')), true)
 })
+
+test('MarkdownReader - adjacent unordered and ordered lists split into separate ul and ol blocks', () => {
+  const md = [
+    MARKDOWN_CONTENT_MARKER,
+    '- 无序第一项',
+    '1. 有序第一项',
+  ].join('\n')
+
+  const blocks = splitMarkdownBlocks(md)
+  assert.equal(blocks.length, 2)
+  const html = blocks
+    .map((block, idx) => renderToStaticMarkup(React.createElement(MarkdownBlock, { key: idx, block })))
+    .join('\n')
+  assert.equal(html.includes('<ul '), true)
+  assert.equal(html.includes('<ol '), true)
+})

@@ -190,7 +190,7 @@ class LocalBookMarkdownDocxTest {
             val contentResp = client.post("/api/books/content") {
                 contentType(ContentType.Application.Json)
                 header("X-CSRF-Token", csrf)
-                setBody(ContentRequest(sourceId = LocalBookParser.LOC_BOOK_SOURCE_ID, bookUrl = docxItem.bookUrl, chapterUrl = "${docxItem.bookUrl}/0"))
+                setBody(ContentRequest(sourceId = LocalBookParser.LOC_BOOK_SOURCE_ID, bookUrl = docxItem.bookUrl, chapterUrl = "${docxItem.bookUrl}/chapter_1"))
             }
             assertEquals(HttpStatusCode.OK, contentResp.status)
             val chContent = contentResp.body<ChapterContent>()
@@ -202,14 +202,18 @@ class LocalBookMarkdownDocxTest {
             assertArrayEquals(pngBytes, mediaResp.readRawBytes())
 
             // 删除书籍后确认图片目录被清理
-            val delResp = client.delete("/api/bookshelf?sourceId=${LocalBookParser.LOC_BOOK_SOURCE_ID}&bookUrl=${docxItem.bookUrl}") {
+            val delResp = client.delete("/api/bookshelf") {
+                parameter("sourceId", LocalBookParser.LOC_BOOK_SOURCE_ID)
+                parameter("bookUrl", docxItem.bookUrl)
                 header("X-CSRF-Token", csrf)
             }
             assertEquals(HttpStatusCode.NoContent, delResp.status)
             assertFalse(Files.exists(dataDir.resolve("local_books/${docxBookId}_media")))
 
             // 顺手清理 md 测试书
-            client.delete("/api/bookshelf?sourceId=${LocalBookParser.LOC_BOOK_SOURCE_ID}&bookUrl=${mdItem.bookUrl}") {
+            client.delete("/api/bookshelf") {
+                parameter("sourceId", LocalBookParser.LOC_BOOK_SOURCE_ID)
+                parameter("bookUrl", mdItem.bookUrl)
                 header("X-CSRF-Token", csrf)
             }
         } finally {

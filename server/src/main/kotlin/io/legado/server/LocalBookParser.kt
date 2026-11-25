@@ -460,6 +460,7 @@ object LocalBookParser {
 
         val blocks = mutableListOf<String>()
         var listLinesBuffer = mutableListOf<String>()
+        var listOrderedState: Boolean? = null
         var quoteLinesBuffer = mutableListOf<String>()
         var codeLinesBuffer = mutableListOf<String>()
 
@@ -467,6 +468,7 @@ object LocalBookParser {
             if (listLinesBuffer.isNotEmpty()) {
                 blocks.add(listLinesBuffer.joinToString("\n"))
                 listLinesBuffer = mutableListOf()
+                listOrderedState = null
             }
         }
 
@@ -537,6 +539,10 @@ object LocalBookParser {
                             flushQuote()
                             flushCode()
                             val ordered = numberingMap[numId]?.get(ilvl) ?: false
+                            if (listOrderedState != null && listOrderedState != ordered) {
+                                flushList()
+                            }
+                            listOrderedState = ordered
                             val indent = "  ".repeat(ilvl.coerceIn(0, 4))
                             val prefix = if (ordered) "1. " else "- "
                             val normalizedLine = plainText.replace('\n', ' ').trim()

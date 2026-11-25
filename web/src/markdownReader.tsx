@@ -146,21 +146,24 @@ export function splitMarkdownBlocks(raw: string): string[] {
       continue
     }
 
-    // 7. 列表块（支持嵌套缩进、单空行衔接同列表）
+    // 7. 列表块（同类型无序/有序才合并；相邻切换列表类型时自动分成两个独立列表块）
     if (UNORDERED_LIST_RE.test(line) || ORDERED_LIST_RE.test(line)) {
+      const isOrderedBlock = ORDERED_LIST_RE.test(line)
+      const isSameListKind = (candidate: string) =>
+        isOrderedBlock ? ORDERED_LIST_RE.test(candidate) : UNORDERED_LIST_RE.test(candidate)
       const buf = [line]
       i++
       while (i < lines.length) {
         const cur = lines[i]
         if (!cur.trim()) {
-          // 若空行紧接着仍是列表项则合并为同一列表块，否则结束列表
-          if (i + 1 < lines.length && (UNORDERED_LIST_RE.test(lines[i + 1]) || ORDERED_LIST_RE.test(lines[i + 1]))) {
+          // 若空行紧接着仍是同类型列表项则合并为同一列表块，否则结束列表
+          if (i + 1 < lines.length && isSameListKind(lines[i + 1])) {
             i++
             continue
           }
           break
         }
-        if (UNORDERED_LIST_RE.test(cur) || ORDERED_LIST_RE.test(cur) || /^ {2,}\S/.test(cur)) {
+        if (isSameListKind(cur) || /^ {2,}\S/.test(cur)) {
           buf.push(cur)
           i++
         } else {
